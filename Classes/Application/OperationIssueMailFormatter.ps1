@@ -1,5 +1,30 @@
-# Formats grouped operational failures into a mail body that humans can triage quickly.
+<#
+.SYNOPSIS
+Formats grouped operation issues into an HTML failure summary mail.
+
+.DESCRIPTION
+Builds human-readable mail markup that groups issues by handling department and
+optionally includes assignee and deep-link information for triage.
+
+.NOTES
+Methods:
+- EscapeHtml(value)
+- GroupByDepartment(issues)
+- BuildIssueMarkup(issue)
+- BuildDepartmentSection(department, issues)
+- BuildFailureSummaryBody(issues)
+
+.EXAMPLE
+$body = $formatter.BuildFailureSummaryBody($issues)
+#>
 class OperationIssueMailFormatter {
+    <#
+    .SYNOPSIS
+    Escapes HTML-sensitive content for safe mail rendering.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] EscapeHtml([string] $value) {
         if ($null -eq $value) {
             return ''
@@ -8,6 +33,13 @@ class OperationIssueMailFormatter {
         return [System.Security.SecurityElement]::Escape($value)
     }
 
+    <#
+    .SYNOPSIS
+    Groups issues by handling department.
+
+    .OUTPUTS
+    System.Collections.Hashtable
+    #>
     hidden [hashtable] GroupByDepartment([OperationIssue[]] $issues) {
         $groups = @{}
 
@@ -23,6 +55,13 @@ class OperationIssueMailFormatter {
         return $groups
     }
 
+    <#
+    .SYNOPSIS
+    Builds the HTML list item for a single issue.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] BuildIssueMarkup([OperationIssue] $issue) {
         $handlerMarkup = ''
         if ($issue.HandlingContext.HasAssignedHandler()) {
@@ -41,6 +80,13 @@ class OperationIssueMailFormatter {
             $handlerMarkup
     }
 
+    <#
+    .SYNOPSIS
+    Builds the HTML section for one department.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] BuildDepartmentSection([string] $department, [OperationIssue[]] $issues) {
         $items = @()
         foreach ($issue in @($issues)) {
@@ -55,6 +101,17 @@ $($items -join [Environment]::NewLine)
 "@
     }
 
+    <#
+    .SYNOPSIS
+    Builds the full failure summary mail body.
+
+    .DESCRIPTION
+    Returns `$null` when no issues are present. Otherwise it renders a grouped
+    HTML body that operators can triage quickly.
+
+    .OUTPUTS
+    System.String
+    #>
     [string] BuildFailureSummaryBody([OperationIssue[]] $issues) {
         if (-not $issues) {
             return $null

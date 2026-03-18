@@ -239,6 +239,45 @@ class FakeThrowingSmtpMailClient : SmtpMailClient {
         throw [System.InvalidOperationException]::new('SMTP unavailable.')
     }
 }
+
+class FakePrerequisiteValidationService : PrerequisiteValidationService {
+    [PrerequisiteEvaluation] $EvaluationToReturn
+    [int] $EvaluateCallCount
+
+    FakePrerequisiteValidationService() : base($null, $null, $null) {
+    }
+
+    [PrerequisiteEvaluation] Evaluate([PrefixWorkItem] $workItem, [EnvironmentContext] $environment) {
+        $this.EvaluateCallCount++
+        return $this.EvaluationToReturn
+    }
+}
+
+class RecordingPrefixOnboardingService : PrefixOnboardingService {
+    [BatchRunSummary] $SummaryToReturn
+    [int] $ProcessBatchCallCount
+
+    RecordingPrefixOnboardingService() : base($null, $null, $null, $null, $null, $null, $null, $null, $null) {
+    }
+
+    [BatchRunSummary] ProcessBatch([EnvironmentContext] $environment) {
+        $this.ProcessBatchCallCount++
+        return $this.SummaryToReturn
+    }
+}
+
+class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
+    [BatchRunSummary] $SummaryToReturn
+    [int] $ProcessBatchCallCount
+
+    RecordingIpDnsLifecycleService([string] $mode) : base($mode, $null, $null, $null, $null) {
+    }
+
+    [BatchRunSummary] ProcessBatch([EnvironmentContext] $environment) {
+        $this.ProcessBatchCallCount++
+        return $this.SummaryToReturn
+    }
+}
 '@
             }
         }
@@ -606,6 +645,195 @@ class FakeThrowingSmtpMailClient : SmtpMailClient {
             $summaries[1].ProcessName | Should -Be 'FailureNotification'
             $summaries[1].FailureCount | Should -Be 1
             $summaries[1].Issues[0].Message | Should -Match 'Failed to send failure summary mail'
+        }
+
+        It 'loads prefix work items through ProcessBatch before executing the use case' {
+            $script:activeDirectory.SubnetSiteValue = 'MUC'
+            $script:dns.ReverseZoneName = '30.20.10.in-addr.arpa'
+            $script:dns.HasDelegation = $true
+            $script:netBox.PrefixItems = @(
+                [PrefixWorkItem]::new(
+                    31, '10.20.34.0/24', 'Office', 'no_dhcp', 'de.mtu.corp',
+                    'MUC', 7, 106, '10.20.34.254', 'gw102034.de.mtu.corp', 'MUC', $null
+                )
+            )
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $script:prerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+
+            $summary = $service.ProcessBatch($script:environment)
+
+            $summary.SuccessCount | Should -Be 1
+            $script:netBox.MarkedPrefixes | Should -Contain 31
+        }
+
+        It 'fails blocked prefixes with an existing Jira ticket instead of creating a new one' {
+            $script:activeDirectory.SubnetSiteValue = $null
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $script:prerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                32, '10.20.35.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 107, '10.20.35.254', 'gw102035.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-32'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 0
+            $summary.FailureCount | Should -Be 1
+            $summary.Issues[0].Message | Should -Match 'Network is not assigned to any AD site'
+            $script:netBox.UpdatedPrefixTickets.Count | Should -Be 0
+            $script:journal.PrefixErrorEntries.Count | Should -Be 1
+        }
+
+        It 'uses the default blocked-prefix message when validation returns no reasons' {
+            $fakePrerequisites = New-Object -TypeName FakePrerequisiteValidationService
+            $fakePrerequisites.EvaluationToReturn = [PrerequisiteEvaluation]::new()
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $fakePrerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                33, '10.20.36.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 108, '10.20.36.254', 'gw102036.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-33'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.FailureCount | Should -Be 1
+            $summary.Issues[0].Message | Should -Match 'Prefix prerequisites are not satisfied'
+            $fakePrerequisites.EvaluateCallCount | Should -Be 1
+        }
+
+        It 'fails DHCP-backed prefixes when the configured gateway mismatches the derived DHCP gateway' {
+            $script:activeDirectory.SubnetSiteValue = 'MUC'
+            $script:dns.ReverseZoneName = '30.20.10.in-addr.arpa'
+            $script:dns.HasDelegation = $true
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $script:prerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                34, '10.20.37.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 109, '10.20.37.1', 'gw102037.de.mtu.corp', 'MUC', $null
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 0
+            $summary.FailureCount | Should -Be 1
+            $summary.Issues[0].Message | Should -Match 'Gateway mismatch'
+            $script:dhcp.EnsuredScopes.Count | Should -Be 0
+        }
+
+        It 'loads IP work items through ProcessBatch for DNS onboarding' {
+            $script:netBox.IpItems = @(
+                [IpAddressWorkItem]::new(41, '10.20.30.41', 'onboarding_open_dns', 'host102041', 'de.mtu.corp', '10.20.30.0/24')
+            )
+            $service = [IpDnsLifecycleService]::new(
+                'onboarding',
+                $script:netBox,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+
+            $summary = $service.ProcessBatch($script:environment)
+
+            $summary.SuccessCount | Should -Be 1
+            $script:gatewayDns.IpEnsureCalls | Should -Contain '10.20.30.41'
+        }
+
+        It 'allows missing DNS names during IP decommissioning' {
+            $service = [IpDnsLifecycleService]::new(
+                'decommissioning',
+                $script:netBox,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [IpAddressWorkItem]::new(42, '10.20.30.42', 'decommissioning_open_dns', $null, 'de.mtu.corp', '10.20.30.0/24')
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 1
+            $summary.FailureCount | Should -Be 0
+            $script:gatewayDns.IpRemoveCalls | Should -Contain '10.20.30.42'
+        }
+
+        It 'rejects unsupported IP lifecycle modes' {
+            {
+                [IpDnsLifecycleService]::new(
+                    'unexpected',
+                    $script:netBox,
+                    $script:gatewayDns,
+                    $script:journal,
+                    $script:logService
+                )
+            } | Should -Throw
+        }
+
+        It 'runs only the enabled services when coordinator skip flags are used' {
+            $prefixSummary = [BatchRunSummary]::new('PrefixOnboarding')
+            $prefixSummary.Complete()
+            $ipSummary = [BatchRunSummary]::new('IpDnsOnboarding')
+            $ipSummary.Complete()
+            $decomSummary = [BatchRunSummary]::new('IpDnsDecommissioning')
+            $decomSummary.Complete()
+            $prefixService = New-Object -TypeName RecordingPrefixOnboardingService
+            $prefixService.SummaryToReturn = $prefixSummary
+            $ipOnboardingService = New-Object -TypeName RecordingIpDnsLifecycleService -ArgumentList 'onboarding'
+            $ipOnboardingService.SummaryToReturn = $ipSummary
+            $ipDecommissioningService = New-Object -TypeName RecordingIpDnsLifecycleService -ArgumentList 'decommissioning'
+            $ipDecommissioningService.SummaryToReturn = $decomSummary
+            $notificationService = [BatchNotificationService]::new(
+                (New-Object -TypeName FakeSmtpMailClient -ArgumentList $script:activeDirectory),
+                [OperationIssueMailFormatter]::new()
+            )
+            $coordinator = [AutomationCoordinator]::new(
+                $prefixService,
+                $ipOnboardingService,
+                $ipDecommissioningService,
+                $notificationService
+            )
+
+            $summaries = $coordinator.Run($script:environment, @('ops@example.test'), $false, $true, $false, $true)
+
+            $summaries.Count | Should -Be 1
+            $summaries[0].ProcessName | Should -Be 'IpDnsOnboarding'
+            $prefixService.ProcessBatchCallCount | Should -Be 0
+            $ipOnboardingService.ProcessBatchCallCount | Should -Be 1
+            $ipDecommissioningService.ProcessBatchCallCount | Should -Be 0
         }
     }
 }

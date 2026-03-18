@@ -1,4 +1,22 @@
-# Builds the runtime object graph and acts as the composition root of the module.
+<#
+.SYNOPSIS
+Builds the runtime object graph for the automation module.
+
+.DESCRIPTION
+Acts as the composition root of the module. It resolves configuration and
+credentials, constructs infrastructure adapters and application services, and
+returns a ready-to-run runtime container.
+
+.NOTES
+Methods:
+- AutomationRuntimeFactory(requestedEnvironment, requestedEmailRecipients, configurationPath, credentialDirectory)
+- CreateRuntime()
+- ResolveEnvironment(configurationProvider)
+- ResolveEmailRecipients(configurationProvider)
+
+.EXAMPLE
+$runtime = $factory.CreateRuntime()
+#>
 class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
     [string] $RequestedEnvironment
     [string[]] $RequestedEmailRecipients
@@ -17,6 +35,18 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
         $this.CredentialDirectory = $credentialDirectory
     }
 
+    <#
+    .SYNOPSIS
+    Creates the fully wired runtime for one execution.
+
+    .DESCRIPTION
+    Resolves configuration values and credentials, constructs the infrastructure
+    and application graph, and returns the runtime container used by the public
+    command.
+
+    .OUTPUTS
+    AutomationRuntime
+    #>
     # Composition root for the module. Dependency construction stays here so application services remain injectable and testable.
     [AutomationRuntime] CreateRuntime() {
         $configurationProvider = [EnvFileConfigurationProvider]::new($this.ConfigurationPath)
@@ -28,6 +58,7 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
         $netBoxCredential = $credentialProvider.GetApiCredential('DHCPScopeAutomationNetboxApiKey')
         $jiraCredential = $credentialProvider.GetApiCredential('DHCPScopeAutomationJiraApiKey')
 
+        # All side-effecting adapters are created here so the application layer stays constructor-injected and test-friendly.
         $activeDirectoryAdapter = [ActiveDirectoryAdapter]::new()
         $dnsServerAdapter = [DnsServerAdapter]::new()
         $dhcpServerAdapter = [DhcpServerAdapter]::new()
@@ -68,6 +99,17 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
         return [AutomationRuntime]::new($environmentContext, $resolvedRecipients, $coordinator, $logService)
     }
 
+    <#
+    .SYNOPSIS
+    Resolves the effective environment name.
+
+    .DESCRIPTION
+    Prefers an explicitly requested environment and falls back to the `.env`
+    configuration value when no override was provided.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] ResolveEnvironment([EnvFileConfigurationProvider] $configurationProvider) {
         if (-not [string]::IsNullOrWhiteSpace($this.RequestedEnvironment)) {
             return $this.RequestedEnvironment
@@ -76,6 +118,17 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
         return $configurationProvider.GetValue('Environment', 'Expected one of: dev, test, prod, gov, china.')
     }
 
+    <#
+    .SYNOPSIS
+    Resolves the effective mail recipient list.
+
+    .DESCRIPTION
+    Prefers explicit recipient overrides and falls back to the configured
+    recipient list from the environment file.
+
+    .OUTPUTS
+    System.String[]
+    #>
     hidden [string[]] ResolveEmailRecipients([EnvFileConfigurationProvider] $configurationProvider) {
         if ($this.RequestedEmailRecipients -and $this.RequestedEmailRecipients.Count -gt 0) {
             return @($this.RequestedEmailRecipients)

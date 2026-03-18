@@ -1,5 +1,32 @@
 # Isolates DNS server queries and record management behind a testable adapter boundary.
+<#
+.SYNOPSIS
+Wraps DNS zone discovery and DNS record management.
+
+.DESCRIPTION
+Centralizes reverse-zone lookup, reverse-delegation checks, and forward/reverse
+record management so application services interact with DNS through one adapter.
+
+.NOTES
+Methods:
+- FindBestReverseZoneName(subnet, dnsComputerName)
+- TestReverseZoneDelegation(subnet, domain)
+- GetRelativeDnsName(dnsName, dnsZone)
+- GetPtrOwnerName(reverseZone, ipAddress)
+- RemoveDnsRecordsForIp(dnsServer, dnsZone, reverseZone, ipAddress)
+- EnsureDnsRecordsForIp(dnsServer, dnsZone, dnsName, ipAddress, reverseZone, ptrDomainName)
+
+.EXAMPLE
+$adapter = [DnsServerAdapter]::new()
+$adapter.FindBestReverseZoneName([IPv4Subnet]::new('10.20.30.0/24'), 'dc01.example.test')
+#>
 class DnsServerAdapter {
+    <#
+    .SYNOPSIS
+    Finds the best matching reverse zone for a subnet.
+    .OUTPUTS
+    System.String
+    #>
     [string] FindBestReverseZoneName([IPv4Subnet] $subnet, [string] $dnsComputerName) {
         $zoneName = $subnet.GetReverseZoneName()
         $reverseZones = Get-DnsServerZone -ComputerName $dnsComputerName -ErrorAction Stop | Where-Object { $_.IsReverseLookupZone -eq $true }
@@ -10,6 +37,7 @@ class DnsServerAdapter {
                 return [string] $zone.ZoneName
             }
 
+            # Prefer the longest suffix match when an exact reverse zone is not present.
             $zoneLabels = $zone.ZoneName -split '\.'
             $targetLabels = $zoneName -split '\.'
             if ($targetLabels.Length -ge $zoneLabels.Length) {
@@ -29,10 +57,17 @@ class DnsServerAdapter {
         return [string] $matchedZone.ZoneName
     }
 
+    <#
+    .SYNOPSIS
+    Tests whether reverse DNS delegation exists for a subnet.
+    .OUTPUTS
+    System.Boolean
+    #>
     [bool] TestReverseZoneDelegation([IPv4Subnet] $subnet, [string] $domain) {
         $prefix = $subnet.PrefixLength
         while ($prefix -ge 8) {
-            $candidateSubnet = [IPv4Subnet]::new('{0}/{1}' -f $subnet.NetworkAddress.Value, $prefix)
+            # Walk outward in /8 steps until a delegated reverse zone is found or the search is exhausted.
+            $candidateSubnet = [IPv4Subnet]::new(('{0}/{1}' -f $subnet.NetworkAddress.Value, $prefix))
             $reverseZone = $candidateSubnet.GetReverseZoneName()
 
             try {
@@ -43,7 +78,7 @@ class DnsServerAdapter {
             }
 
             foreach ($record in @($nsResult)) {
-                if ($record.NameHost -and $record.NameHost.ToLowerInvariant().EndsWith('.{0}' -f $domain.ToLowerInvariant())) {
+                if ($record.NameHost -and $record.NameHost.ToLowerInvariant().EndsWith(('.{0}' -f $domain.ToLowerInvariant()))) {
                     return $true
                 }
             }
@@ -54,14 +89,26 @@ class DnsServerAdapter {
         return $false
     }
 
+    <#
+    .SYNOPSIS
+    Returns the record-relative DNS name for a zone.
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetRelativeDnsName([string] $dnsName, [string] $dnsZone) {
-        if ($dnsName.ToLowerInvariant().EndsWith('.{0}' -f $dnsZone.ToLowerInvariant())) {
+        if ($dnsName.ToLowerInvariant().EndsWith(('.{0}' -f $dnsZone.ToLowerInvariant()))) {
             return ($dnsName -replace ('\.{0}$' -f [regex]::Escape($dnsZone)), '')
         }
 
         return $dnsName
     }
 
+    <#
+    .SYNOPSIS
+    Returns the PTR owner name inside a reverse zone.
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetPtrOwnerName([string] $reverseZone, [IPv4Address] $ipAddress) {
         $zonePart = ($reverseZone.TrimEnd('.').ToLowerInvariant() -replace '\.?in-addr\.arpa$', '').Trim('.')
         $labels = @()
@@ -81,6 +128,12 @@ class DnsServerAdapter {
         return $ownerName
     }
 
+    <#
+    .SYNOPSIS
+    Removes forward and reverse DNS records for an IP address.
+    .OUTPUTS
+    System.Void
+    #>
     [void] RemoveDnsRecordsForIp([string] $dnsServer, [string] $dnsZone, [string] $reverseZone, [IPv4Address] $ipAddress) {
         $ipValue = $ipAddress.Value
 
@@ -100,6 +153,12 @@ class DnsServerAdapter {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Ensures forward and reverse DNS records for an IP address.
+    .OUTPUTS
+    System.Void
+    #>
     [void] EnsureDnsRecordsForIp(
         [string] $dnsServer,
         [string] $dnsZone,
@@ -109,6 +168,7 @@ class DnsServerAdapter {
         [string] $ptrDomainName
     ) {
         $relativeDnsName = $this.GetRelativeDnsName($dnsName, $dnsZone)
+        # Remove first so onboarding is idempotent even when stale records already exist.
         $this.RemoveDnsRecordsForIp($dnsServer, $dnsZone, $reverseZone, $ipAddress)
 
         $existingARecord = Get-DnsServerResourceRecord -ComputerName $dnsServer -ZoneName $dnsZone -Name $relativeDnsName -RRType A -ErrorAction SilentlyContinue

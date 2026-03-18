@@ -1,4 +1,29 @@
-# Orchestrates the end-to-end prefix onboarding use case.
+<#
+.SYNOPSIS
+Orchestrates the end-to-end prefix onboarding use case.
+
+.DESCRIPTION
+Implements the application-service workflow for provisioning new prefixes. The
+service validates prerequisites, branches between manual-work and automated
+paths, applies DHCP and DNS changes, updates NetBox, and translates failures
+into a consistent reporting model.
+
+.NOTES
+Methods:
+- PrefixOnboardingService(netBoxClient, activeDirectoryAdapter, jiraClient, prerequisiteValidationService, dhcpServerSelectionService, dhcpServerAdapter, gatewayDnsService, journalService, logService)
+- ProcessBatch(environment)
+- ProcessWorkItems(environment, workItems)
+- ProcessWorkItem(environment, workItem, summary)
+- HandleBlockedPrerequisites(workItem, evaluation, lines, summary)
+- CompleteNoDhcpPrefix(workItem, lines, summary)
+- CompleteDhcpBackedPrefix(environment, workItem, evaluation, lines, summary)
+- HandleProcessingFailure(workItem, lines, summary, exception)
+- BuildFailureHandlingContext(workItem, exception)
+- WriteExecutionLog(workItem, lines)
+
+.EXAMPLE
+$summary = $service.ProcessBatch([EnvironmentContext]::new('prod'))
+#>
 class PrefixOnboardingService {
     [NetBoxClient] $NetBoxClient
     [ActiveDirectoryAdapter] $ActiveDirectoryAdapter
@@ -32,12 +57,43 @@ class PrefixOnboardingService {
         $this.LogService = $logService
     }
 
+    <#
+    .SYNOPSIS
+    Loads open prefixes from NetBox and processes them.
+
+    .DESCRIPTION
+    Serves as the main entry point for the prefix onboarding use case and keeps
+    repository access separate from the reusable batch shell.
+
+    .PARAMETER environment
+    The resolved execution environment.
+
+    .OUTPUTS
+    BatchRunSummary
+    #>
     # Batch entry point for the use case. It acts as the application-service orchestrator and keeps iteration outside the domain model.
     [BatchRunSummary] ProcessBatch([EnvironmentContext] $environment) {
         $workItems = $this.NetBoxClient.GetOpenPrefixWorkItems($environment)
         return $this.ProcessWorkItems($environment, $workItems)
     }
 
+    <#
+    .SYNOPSIS
+    Processes explicitly supplied prefix work items.
+
+    .DESCRIPTION
+    Executes the invariant batch shell with caller-provided work items. This
+    seam exists to make the orchestration deterministic and easy to test.
+
+    .PARAMETER environment
+    The resolved execution environment.
+
+    .PARAMETER workItems
+    Prefix work items that should be handled in this batch.
+
+    .OUTPUTS
+    BatchRunSummary
+    #>
     # Exposes the invariant batch shell separately from data loading so tests can drive the use case with explicit work items.
     [BatchRunSummary] ProcessWorkItems([EnvironmentContext] $environment, [PrefixWorkItem[]] $workItems) {
         $summary = [BatchRunSummary]::new('PrefixOnboarding')
@@ -52,6 +108,23 @@ class PrefixOnboardingService {
         return $summary
     }
 
+    <#
+    .SYNOPSIS
+    Processes one prefix through the onboarding workflow.
+
+    .DESCRIPTION
+    Executes the template-style work-item flow of prerequisite validation,
+    policy branching, side-effecting provisioning, and failure translation.
+
+    .PARAMETER environment
+    The resolved execution environment.
+
+    .PARAMETER workItem
+    Prefix work item that should be provisioned.
+
+    .PARAMETER summary
+    Batch summary that records audit information and outcomes.
+    #>
     # Template-style work-item flow: validate, branch by policy, execute provisioning, translate all failures into one reporting model.
     hidden [void] ProcessWorkItem([EnvironmentContext] $environment, [PrefixWorkItem] $workItem, [BatchRunSummary] $summary) {
         $lines = @(('Processing prefix {0}' -f $workItem.GetIdentifier()))
@@ -78,6 +151,15 @@ class PrefixOnboardingService {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Handles prefixes whose prerequisites are not yet satisfied.
+
+    .DESCRIPTION
+    Applies the manual-work policy for blocked prefixes. Depending on the
+    evaluation result it either creates a Jira ticket and records progress, or
+    raises a blocking exception for the caller to translate into an issue.
+    #>
     # Separates prerequisite handling from provisioning so the Jira/manual-work policy can evolve without touching DHCP or DNS steps.
     hidden [void] HandleBlockedPrerequisites(
         [PrefixWorkItem] $workItem,
@@ -105,6 +187,14 @@ class PrefixOnboardingService {
         throw [System.InvalidOperationException]::new($message)
     }
 
+    <#
+    .SYNOPSIS
+    Completes the onboarding path for prefixes without DHCP provisioning.
+
+    .DESCRIPTION
+    Applies gateway DNS and marks the prefix as completed in NetBox without
+    creating a DHCP scope.
+    #>
     hidden [void] CompleteNoDhcpPrefix([PrefixWorkItem] $workItem, [string[]] $lines, [BatchRunSummary] $summary) {
         $this.GatewayDnsService.EnsurePrefixGatewayDns($workItem)
         $this.NetBoxClient.MarkPrefixOnboardingDone($workItem.Id)
@@ -116,6 +206,14 @@ class PrefixOnboardingService {
         $summary.AddSuccess(('Completed no_dhcp prefix {0}' -f $workItem.GetIdentifier()))
     }
 
+    <#
+    .SYNOPSIS
+    Completes the full DHCP-backed provisioning path for a prefix.
+
+    .DESCRIPTION
+    Creates the DHCP scope, applies gateway DNS, ensures failover linkage, and
+    updates NetBox once all infrastructure steps have completed successfully.
+    #>
     # Orchestrates the full side-effecting provisioning path; this is intentionally an application-level workflow, not domain logic.
     hidden [void] CompleteDhcpBackedPrefix(
         [EnvironmentContext] $environment,
@@ -132,6 +230,7 @@ class PrefixOnboardingService {
             )
         }
 
+        # Server selection is environment-aware and intentionally delegated so onboarding does not encode routing policy itself.
         $selectedServer = $this.DhcpServerSelectionService.SelectServer($environment, $evaluation.ObservedAdSite)
         $lines += 'Selected DHCP server: {0}' -f $selectedServer
 
@@ -153,6 +252,14 @@ class PrefixOnboardingService {
         $summary.AddSuccess(('Completed prefix onboarding for {0}' -f $workItem.GetIdentifier()))
     }
 
+    <#
+    .SYNOPSIS
+    Translates a prefix provisioning failure into logs, journal entries, and an issue.
+
+    .DESCRIPTION
+    Ensures that exceptions from the onboarding workflow become visible to
+    operators even when the NetBox error journal write itself fails.
+    #>
     hidden [void] HandleProcessingFailure(
         [PrefixWorkItem] $workItem,
         [string[]] $lines,
@@ -182,10 +289,32 @@ class PrefixOnboardingService {
         )
     }
 
+    <#
+    .SYNOPSIS
+    Builds the failure ownership context for a prefix issue.
+
+    .DESCRIPTION
+    Provides the extension seam for assigning departments or handlers to
+    operational failures in a later iteration.
+
+    .OUTPUTS
+    IssueHandlingContext
+    #>
     hidden [IssueHandlingContext] BuildFailureHandlingContext([PrefixWorkItem] $workItem, [System.Exception] $exception) {
         return [IssueHandlingContext]::CreateUnassigned()
     }
 
+    <#
+    .SYNOPSIS
+    Writes the execution log for one prefix work item.
+
+    .DESCRIPTION
+    Persists the collected log lines and appends the relative log path so the
+    same line set can be reused in NetBox journals and failure reports.
+
+    .OUTPUTS
+    System.String[]
+    #>
     hidden [string[]] WriteExecutionLog([PrefixWorkItem] $workItem, [string[]] $lines) {
         $logPath = $this.LogService.CreateLogPath('network', $workItem.GetIdentifier())
         $linesWithLogPath = @($lines + ('Log file: {0}' -f $logPath))

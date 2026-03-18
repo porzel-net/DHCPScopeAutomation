@@ -42,7 +42,7 @@ $syntaxOnlyPaths = @(
 )
 
 $runtimePaths = @(
-    './Classes/AllClasses.ps1',
+    './Classes',
     './Private',
     './Public'
 )

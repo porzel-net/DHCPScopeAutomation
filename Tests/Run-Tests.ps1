@@ -15,7 +15,9 @@ $configuration.Run.PassThru = $true
 $configuration.Output.Verbosity = 'Detailed'
 $configuration.CodeCoverage.Enabled = $true
 $configuration.CodeCoverage.Path = @(
-    (Join-Path -Path $moduleRoot -ChildPath 'Classes/AllClasses.ps1'),
+    @(Get-ChildItem -Path (Join-Path -Path $moduleRoot -ChildPath 'Classes') -Filter '*.ps1' -Recurse |
+        Where-Object { $_.Name -ne 'ImportClasses.ps1' } |
+        Select-Object -ExpandProperty FullName),
     (Join-Path -Path $moduleRoot -ChildPath 'Public/*.ps1'),
     (Join-Path -Path $moduleRoot -ChildPath 'Private/*.ps1')
 )

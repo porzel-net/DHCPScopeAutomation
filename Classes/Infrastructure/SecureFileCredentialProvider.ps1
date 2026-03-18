@@ -1,4 +1,21 @@
 # Loads persisted secure credential files and converts them into automation credentials.
+<#
+.SYNOPSIS
+Loads persisted API credentials from secure XML files.
+
+.DESCRIPTION
+Provides the credential storage abstraction for the automation. Existing files are
+loaded non-interactively; missing files can be bootstrapped interactively.
+
+.NOTES
+Methods:
+- SecureFileCredentialProvider(credentialBasePath)
+- GetApiCredential(credentialName)
+
+.EXAMPLE
+$provider = [SecureFileCredentialProvider]::new('.secureCreds')
+$provider.GetApiCredential('DHCPScopeAutomationNetboxApiKey')
+#>
 class SecureFileCredentialProvider {
     [string] $BasePath
 
@@ -14,6 +31,12 @@ class SecureFileCredentialProvider {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Loads one persisted API credential or bootstraps it interactively.
+    .OUTPUTS
+    AutomationCredential
+    #>
     [AutomationCredential] GetApiCredential([string] $credentialName) {
         if ([string]::IsNullOrWhiteSpace($credentialName)) {
             throw [System.ArgumentException]::new('CredentialName is required.')

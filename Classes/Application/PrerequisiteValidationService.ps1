@@ -1,4 +1,20 @@
-# Evaluates whether a prefix is ready for provisioning without performing side effects.
+<#
+.SYNOPSIS
+Evaluates whether a prefix is ready for automated provisioning.
+
+.DESCRIPTION
+Runs the read-only prerequisite checks for AD site placement, site/mandant
+matching, reverse-zone presence, DNS delegation, and Jira closure. The result is
+returned as a domain object so the caller can decide the next action.
+
+.NOTES
+Methods:
+- PrerequisiteValidationService(activeDirectoryAdapter, dnsServerAdapter, jiraClient)
+- Evaluate(workItem, environment)
+
+.EXAMPLE
+$evaluation = $validator.Evaluate($workItem, $environment)
+#>
 class PrerequisiteValidationService {
     [ActiveDirectoryAdapter] $ActiveDirectoryAdapter
     [DnsServerAdapter] $DnsServerAdapter
@@ -14,8 +30,27 @@ class PrerequisiteValidationService {
         $this.JiraClient = $jiraClient
     }
 
+    <#
+    .SYNOPSIS
+    Evaluates all onboarding prerequisites for one prefix.
+
+    .DESCRIPTION
+    Performs the prerequisite pipeline as a read-only validation step. It
+    returns early when a blocking precondition is missing so the caller can
+    either create manual-work tickets or stop automated provisioning.
+
+    .PARAMETER workItem
+    Prefix work item whose prerequisites should be checked.
+
+    .PARAMETER environment
+    The resolved execution environment.
+
+    .OUTPUTS
+    PrerequisiteEvaluation
+    #>
     # Runs the prerequisite pipeline as a pure validation step so callers can decide how to react to blocked work.
     [PrerequisiteEvaluation] Evaluate([PrefixWorkItem] $workItem, [EnvironmentContext] $environment) {
+        # The evaluation object is the single carrier for all prerequisite outcomes so the caller does not need to interpret partial booleans.
         $evaluation = [PrerequisiteEvaluation]::new()
         $domainController = $this.ActiveDirectoryAdapter.GetDomainControllerName()
         $evaluation.ObservedAdSite = $this.ActiveDirectoryAdapter.GetSubnetSite($workItem.PrefixSubnet, $domainController)

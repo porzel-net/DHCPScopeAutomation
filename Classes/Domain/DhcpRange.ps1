@@ -1,4 +1,20 @@
 # Represents the usable address range that should be handed out by a DHCP scope.
+<#
+.SYNOPSIS
+Represents the usable DHCP address range for a subnet.
+
+.DESCRIPTION
+Combines start, end, gateway, broadcast, and reserved address information in one
+value object so DHCP provisioning code receives fully derived input.
+
+.NOTES
+Methods:
+- DhcpRange(startAddress, endAddress, gatewayAddress, broadcastAddress, reservedAfterGateway)
+- FromSubnet(subnet, dhcpType)
+
+.EXAMPLE
+[DhcpRange]::FromSubnet([IPv4Subnet]::new('10.20.30.0/24'), 'dhcp_dynamic')
+#>
 class DhcpRange {
     [IPv4Address] $StartAddress
     [IPv4Address] $EndAddress
@@ -28,6 +44,17 @@ class DhcpRange {
         $this.ReservedAfterGateway = $reservedAfterGateway
     }
 
+    <#
+    .SYNOPSIS
+    Derives the DHCP range for a subnet and DHCP type.
+
+    .DESCRIPTION
+    Calculates the first usable address, last assignable address, gateway, and
+    reserved capacity according to the DHCP model.
+
+    .OUTPUTS
+    DhcpRange
+    #>
     static [DhcpRange] FromSubnet([IPv4Subnet] $subnet, [string] $dhcpType) {
         if ($null -eq $subnet) {
             throw [System.ArgumentNullException]::new('subnet')

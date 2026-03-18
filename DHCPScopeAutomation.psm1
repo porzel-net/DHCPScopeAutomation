@@ -1,6 +1,6 @@
 $moduleRoot = $PSScriptRoot
 
-. (Join-Path -Path $moduleRoot -ChildPath 'Classes/AllClasses.ps1')
+. (Join-Path -Path $moduleRoot -ChildPath 'Classes/ImportClasses.ps1')
 
 . (Join-Path -Path $moduleRoot -ChildPath 'Private/Import-AutomationDependencies.ps1')
 . (Join-Path -Path $moduleRoot -ChildPath 'Private/Write-AutomationLogEntry.ps1')

@@ -1,4 +1,28 @@
 # Models an IPv4 network and centralizes address arithmetic used across the domain layer.
+<#
+.SYNOPSIS
+Represents a validated IPv4 subnet in CIDR notation.
+
+.DESCRIPTION
+Provides the derived network information needed by AD, DNS, and DHCP logic,
+including subnet mask, broadcast address, reverse zone name, and /24 block splits.
+
+.NOTES
+Methods:
+- IPv4Subnet(cidr)
+- GetMask(prefixLength)
+- GetNetworkNumber(address, mask)
+- GetSubnetMaskString()
+- GetBroadcastAddress()
+- GetAddressAtOffset(offset)
+- GetReverseZoneName()
+- GetAdLookupCandidates()
+- Get24BlockBaseAddresses()
+- ToString()
+
+.EXAMPLE
+[IPv4Subnet]::new('10.20.30.0/24')
+#>
 class IPv4Subnet {
     [string] $Cidr
     [IPv4Address] $NetworkAddress
@@ -44,20 +68,44 @@ class IPv4Subnet {
         return [uint32] ($address -band $mask)
     }
 
+    <#
+    .SYNOPSIS
+    Returns the dotted subnet mask for the prefix length.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetSubnetMaskString() {
         return [IPv4Address]::ConvertFromUInt32([IPv4Subnet]::GetMask($this.PrefixLength))
     }
 
+    <#
+    .SYNOPSIS
+    Returns the broadcast address of the subnet.
+    .OUTPUTS
+    IPv4Address
+    #>
     [IPv4Address] GetBroadcastAddress() {
         $hostBits = 32 - $this.PrefixLength
         $broadcastNumber = [uint32] ($this.NetworkAddress.GetUInt32() + [uint32]([math]::Pow(2, $hostBits) - 1))
         return [IPv4Address]::new([IPv4Address]::ConvertFromUInt32($broadcastNumber))
     }
 
+    <#
+    .SYNOPSIS
+    Returns the address at the supplied offset inside the subnet.
+    .OUTPUTS
+    IPv4Address
+    #>
     [IPv4Address] GetAddressAtOffset([int] $offset) {
         return $this.NetworkAddress.AddOffset($offset)
     }
 
+    <#
+    .SYNOPSIS
+    Returns the octet-based reverse lookup zone name.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetReverseZoneName() {
         $fullOctets = [math]::Floor($this.PrefixLength / 8)
         if ($fullOctets -lt 1 -or $fullOctets -gt 4) {
@@ -75,6 +123,16 @@ class IPv4Subnet {
         throw [System.InvalidOperationException]::new("Unable to derive reverse zone for '$($this.Cidr)'.")
     }
 
+    <#
+    .SYNOPSIS
+    Returns fallback subnet candidates for AD site lookup.
+
+    .DESCRIPTION
+    Produces the original CIDR plus /24, /16, and /8 fallbacks in descending
+    specificity so AD lookup can degrade gracefully.
+    .OUTPUTS
+    System.String[]
+    #>
     [string[]] GetAdLookupCandidates() {
         $candidates = @($this.Cidr)
         $octets = $this.NetworkAddress.Value.Split('.')
@@ -100,6 +158,12 @@ class IPv4Subnet {
         return $candidates
     }
 
+    <#
+    .SYNOPSIS
+    Returns the /24 block base addresses overlapped by the subnet.
+    .OUTPUTS
+    System.String[]
+    #>
     [string[]] Get24BlockBaseAddresses() {
         $blocks = @()
         $startNumber = $this.NetworkAddress.GetUInt32()
@@ -114,6 +178,12 @@ class IPv4Subnet {
         return $blocks
     }
 
+    <#
+    .SYNOPSIS
+    Returns the canonical CIDR string.
+    .OUTPUTS
+    System.String
+    #>
     [string] ToString() {
         return $this.Cidr
     }

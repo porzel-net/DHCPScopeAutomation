@@ -1,4 +1,21 @@
 # Maps a NetBox prefix payload into the domain shape required for prefix onboarding.
+<#
+.SYNOPSIS
+Represents one prefix work item loaded from NetBox.
+
+.DESCRIPTION
+Stores the business data required for prerequisite validation, DHCP provisioning,
+gateway DNS handling, journaling, and status updates for a network prefix.
+
+.NOTES
+Methods:
+- PrefixWorkItem(...)
+- GetGatewayFqdn()
+- GetIdentifier()
+
+.EXAMPLE
+[PrefixWorkItem]::new(7, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp', 'MUC', 17, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null)
+#>
 class PrefixWorkItem {
     [int] $Id
     [IPv4Subnet] $PrefixSubnet
@@ -51,6 +68,12 @@ class PrefixWorkItem {
         $this.ExistingTicketUrl = $existingTicketUrl
     }
 
+    <#
+    .SYNOPSIS
+    Returns the fully qualified gateway DNS name.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetGatewayFqdn() {
         if ($this.DnsName.ToLowerInvariant().EndsWith($this.Domain.ToLowerInvariant())) {
             return $this.DnsName
@@ -59,6 +82,12 @@ class PrefixWorkItem {
         return '{0}.{1}' -f $this.DnsName, $this.Domain
     }
 
+    <#
+    .SYNOPSIS
+    Returns the stable identifier for the prefix work item.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetIdentifier() {
         return $this.PrefixSubnet.Cidr
     }

@@ -1,5 +1,33 @@
 # Isolates DHCP server discovery and scope provisioning behind a testable adapter boundary.
+<#
+.SYNOPSIS
+Wraps DHCP server discovery and scope provisioning.
+
+.DESCRIPTION
+Encapsulates server selection helpers, scope creation, exclusion handling, and
+failover linking so DHCP-specific PowerShell cmdlets stay out of the application layer.
+
+.NOTES
+Methods:
+- GetSitePattern(site, isDevelopment)
+- IsPrimaryServer(dhcpServer)
+- GetCurrentDomainSuffix()
+- GetPrimaryServerForSite(site, isDevelopment)
+- EnsureScope(dhcpServer, definition)
+- EnsureScopeFailover(dhcpServer, subnet)
+- RemoveScope(dhcpServer, subnet)
+
+.EXAMPLE
+$adapter = [DhcpServerAdapter]::new()
+$adapter.GetPrimaryServerForSite('muc', $false)
+#>
 class DhcpServerAdapter {
+    <#
+    .SYNOPSIS
+    Maps a site code to the DHCP server naming pattern.
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetSitePattern([string] $site, [bool] $isDevelopment) {
         $normalizedSite = $site.Trim().ToLowerInvariant()
         $pattern = $null
@@ -22,6 +50,12 @@ class DhcpServerAdapter {
         return $pattern
     }
 
+    <#
+    .SYNOPSIS
+    Indicates whether a DHCP server is the primary node.
+    .OUTPUTS
+    System.Boolean
+    #>
     hidden [bool] IsPrimaryServer([string] $dhcpServer) {
         $result = Invoke-Command -ComputerName $dhcpServer -ScriptBlock {
             try {
@@ -36,10 +70,22 @@ class DhcpServerAdapter {
         return [bool] $result
     }
 
+    <#
+    .SYNOPSIS
+    Returns the current AD domain suffix for server filtering.
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetCurrentDomainSuffix() {
         return [string] (Get-ADDomainController).Domain
     }
 
+    <#
+    .SYNOPSIS
+    Returns the preferred DHCP server for a site and environment.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetPrimaryServerForSite([string] $site, [bool] $isDevelopment) {
         $pattern = $this.GetSitePattern($site, $isDevelopment)
         $domainSuffix = $this.GetCurrentDomainSuffix()
@@ -65,6 +111,12 @@ class DhcpServerAdapter {
         return [string] $servers[0]
     }
 
+    <#
+    .SYNOPSIS
+    Ensures that a DHCP scope exists with the expected settings.
+    .OUTPUTS
+    System.Void
+    #>
     [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition) {
         $scopeId = $definition.Subnet.NetworkAddress.Value
         $existingScope = Get-DhcpServerv4Scope -ComputerName $dhcpServer -ScopeId $scopeId -ErrorAction SilentlyContinue
@@ -95,6 +147,7 @@ class DhcpServerAdapter {
         Set-DhcpServerv4OptionValue -ComputerName $dhcpServer -ScopeId $scopeId -DnsDomain $definition.DnsDomain -Router $definition.Range.GatewayAddress.Value -ErrorAction Stop
         Set-DhcpServerv4OptionValue -ComputerName $dhcpServer -ScopeId $scopeId -OptionId 28 -Value $definition.Range.BroadcastAddress.Value -ErrorAction Stop
 
+        # Exclusions can be either strict or best-effort depending on the DHCP model.
         foreach ($range in @($definition.ExclusionRanges)) {
             if ($range.MustSucceed) {
                 Add-DhcpServerv4ExclusionRange `
@@ -115,11 +168,18 @@ class DhcpServerAdapter {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Ensures that the created scope is linked into failover when available.
+    .OUTPUTS
+    System.Void
+    #>
     [void] EnsureScopeFailover([string] $dhcpServer, [IPv4Subnet] $subnet) {
         try {
             $failover = Get-DhcpServerv4Failover -ComputerName $dhcpServer -ErrorAction Stop | Select-Object -First 1
         }
         catch {
+            # Missing failover is not fatal for provisioning; the scope itself is still valid.
             return
         }
 
@@ -130,6 +190,12 @@ class DhcpServerAdapter {
         Add-DhcpServerv4FailoverScope -ComputerName $dhcpServer -Name $failover.Name -ScopeId $subnet.NetworkAddress.Value -ErrorAction SilentlyContinue | Out-Null
     }
 
+    <#
+    .SYNOPSIS
+    Placeholder for future prefix decommissioning.
+    .OUTPUTS
+    System.Void
+    #>
     [void] RemoveScope([string] $dhcpServer, [IPv4Subnet] $subnet) {
         throw [System.NotImplementedException]::new('Prefix decommissioning is intentionally not implemented yet.')
     }

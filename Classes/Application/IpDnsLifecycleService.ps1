@@ -1,4 +1,33 @@
-# Reuses one workflow shell for IP DNS onboarding and decommissioning.
+<#
+.SYNOPSIS
+Processes IP DNS onboarding and decommissioning through one shared workflow shell.
+
+.DESCRIPTION
+Implements a mode-driven application service that reuses one orchestration flow
+for both lifecycle directions. Mode-specific behavior is isolated behind small
+helper methods so the main workflow remains linear and testable.
+
+.NOTES
+Methods:
+- IpDnsLifecycleService(mode, netBoxClient, gatewayDnsService, journalService, logService)
+- InitializeMode(mode)
+- ProcessBatch(environment)
+- ProcessWorkItems(environment, workItems)
+- ProcessWorkItem(workItem, summary)
+- ValidateWorkItem(workItem)
+- ExecuteDnsLifecycle(workItem)
+- HandleProcessingFailure(workItem, lines, summary, exception)
+- BuildFailureHandlingContext(workItem, exception)
+- WriteExecutionLog(workItem, lines)
+- GetLifecycleDisplayName()
+- GetProcessingLine(workItem)
+- GetDnsLifecycleResultLine()
+- GetSuccessSummaryMessage(workItem)
+- GetFailureMessage(workItem, exception)
+
+.EXAMPLE
+$summary = $service.ProcessBatch([EnvironmentContext]::new('prod'))
+#>
 class IpDnsLifecycleService {
     [NetBoxClient] $NetBoxClient
     [GatewayDnsService] $GatewayDnsService
@@ -23,6 +52,17 @@ class IpDnsLifecycleService {
         $this.LogService = $logService
     }
 
+    <#
+    .SYNOPSIS
+    Initializes the lifecycle mode for the service instance.
+
+    .DESCRIPTION
+    Normalizes the supplied mode and configures the process name, source
+    statuses, and target status used by the shared lifecycle workflow.
+
+    .PARAMETER mode
+    Supported values are `onboarding` and `decommissioning`.
+    #>
     # Configures the service as a mode-based strategy object so onboarding and decommissioning can reuse one workflow shell.
     hidden [void] InitializeMode([string] $mode) {
         $normalizedMode = $mode
@@ -51,12 +91,43 @@ class IpDnsLifecycleService {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Loads matching IP work items and processes them in batch.
+
+    .DESCRIPTION
+    Uses the configured source statuses for the current mode to load work items
+    from NetBox and then delegates to the reusable batch shell.
+
+    .PARAMETER environment
+    The resolved execution environment.
+
+    .OUTPUTS
+    BatchRunSummary
+    #>
     # Shared batch shell for both lifecycle variants; only the mode-specific strategy changes the business action.
     [BatchRunSummary] ProcessBatch([EnvironmentContext] $environment) {
         $workItems = $this.NetBoxClient.GetIpWorkItems($environment, $this.SourceStatuses)
         return $this.ProcessWorkItems($environment, $workItems)
     }
 
+    <#
+    .SYNOPSIS
+    Processes explicitly supplied IP work items.
+
+    .DESCRIPTION
+    Runs the common lifecycle batch shell without performing repository access.
+    This seam exists mainly to keep the orchestration easy to test.
+
+    .PARAMETER environment
+    The resolved execution environment.
+
+    .PARAMETER workItems
+    IP work items that should be processed in this batch.
+
+    .OUTPUTS
+    BatchRunSummary
+    #>
     # Splits the reusable lifecycle shell from the repository fetch so tests can cover orchestration with synthetic work items.
     [BatchRunSummary] ProcessWorkItems([EnvironmentContext] $environment, [IpAddressWorkItem[]] $workItems) {
         $summary = [BatchRunSummary]::new($this.ProcessName)
@@ -71,6 +142,20 @@ class IpDnsLifecycleService {
         return $summary
     }
 
+    <#
+    .SYNOPSIS
+    Processes one IP work item through the shared lifecycle flow.
+
+    .DESCRIPTION
+    Applies the template-method style sequence of validation, DNS action,
+    NetBox status update, logging, journaling, and failure translation.
+
+    .PARAMETER workItem
+    The IP work item that is currently being handled.
+
+    .PARAMETER summary
+    Batch summary that aggregates audit and result information.
+    #>
     # Template-method style execution: invariant steps stay fixed while mode-dependent behavior is delegated to helper methods.
     hidden [void] ProcessWorkItem([IpAddressWorkItem] $workItem, [BatchRunSummary] $summary) {
         $lines = @($this.GetProcessingLine($workItem))
@@ -94,12 +179,35 @@ class IpDnsLifecycleService {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Validates lifecycle-specific work item requirements.
+
+    .DESCRIPTION
+    Enforces mode-specific preconditions before side effects are triggered. At
+    the moment only onboarding requires a DNS name, but the seam is prepared
+    for additional mode rules.
+
+    .PARAMETER workItem
+    Work item to validate before processing.
+    #>
     hidden [void] ValidateWorkItem([IpAddressWorkItem] $workItem) {
         if ($this.Mode -eq 'onboarding' -and [string]::IsNullOrWhiteSpace($workItem.DnsName)) {
             throw [System.InvalidOperationException]::new("DNS name is missing for IP '$($workItem.GetIdentifier())'.")
         }
     }
 
+    <#
+    .SYNOPSIS
+    Executes the DNS action for the configured lifecycle mode.
+
+    .DESCRIPTION
+    Dispatches to the gateway DNS facade based on the active mode. New lifecycle
+    variants should extend this method instead of copying the full workflow.
+
+    .PARAMETER workItem
+    Work item for which DNS should be changed.
+    #>
     # Strategy dispatch for the lifecycle action; new modes should extend this seam instead of duplicating the service.
     hidden [void] ExecuteDnsLifecycle([IpAddressWorkItem] $workItem) {
         switch ($this.Mode) {
@@ -117,6 +225,26 @@ class IpDnsLifecycleService {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Translates an IP processing exception into reporting artifacts.
+
+    .DESCRIPTION
+    Appends the failure to the execution log, attempts to write a NetBox error
+    journal, and records the issue in the batch summary.
+
+    .PARAMETER workItem
+    Work item that failed.
+
+    .PARAMETER lines
+    Accumulated execution log lines.
+
+    .PARAMETER summary
+    Batch summary that receives warnings and failure records.
+
+    .PARAMETER exception
+    Exception that caused the failure.
+    #>
     hidden [void] HandleProcessingFailure(
         [IpAddressWorkItem] $workItem,
         [string[]] $lines,
@@ -146,10 +274,32 @@ class IpDnsLifecycleService {
         )
     }
 
+    <#
+    .SYNOPSIS
+    Builds the handling context for a failed IP work item.
+
+    .DESCRIPTION
+    Provides the future extension seam for assigning ownership to operational
+    failures without coupling that policy to the main workflow.
+
+    .OUTPUTS
+    IssueHandlingContext
+    #>
     hidden [IssueHandlingContext] BuildFailureHandlingContext([IpAddressWorkItem] $workItem, [System.Exception] $exception) {
         return [IssueHandlingContext]::CreateUnassigned()
     }
 
+    <#
+    .SYNOPSIS
+    Writes the execution log for one IP work item.
+
+    .DESCRIPTION
+    Persists the accumulated log lines under the IP log category and appends the
+    relative log path to the returned line set.
+
+    .OUTPUTS
+    System.String[]
+    #>
     hidden [string[]] WriteExecutionLog([IpAddressWorkItem] $workItem, [string[]] $lines) {
         $logPath = $this.LogService.CreateLogPath('ip', $workItem.GetIdentifier())
         $linesWithLogPath = @($lines + ('Log file: {0}' -f $logPath))
@@ -157,6 +307,13 @@ class IpDnsLifecycleService {
         return $linesWithLogPath
     }
 
+    <#
+    .SYNOPSIS
+    Returns a human-readable name for the configured lifecycle mode.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetLifecycleDisplayName() {
         $result = $null
         switch ($this.Mode) {
@@ -168,6 +325,13 @@ class IpDnsLifecycleService {
         return $result
     }
 
+    <#
+    .SYNOPSIS
+    Returns the first execution-log line for a work item.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetProcessingLine([IpAddressWorkItem] $workItem) {
         $result = $null
         switch ($this.Mode) {
@@ -179,6 +343,13 @@ class IpDnsLifecycleService {
         return $result
     }
 
+    <#
+    .SYNOPSIS
+    Returns the lifecycle-specific DNS result line.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetDnsLifecycleResultLine() {
         $result = $null
         switch ($this.Mode) {
@@ -190,6 +361,13 @@ class IpDnsLifecycleService {
         return $result
     }
 
+    <#
+    .SYNOPSIS
+    Returns the success summary message for a completed work item.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetSuccessSummaryMessage([IpAddressWorkItem] $workItem) {
         $result = $null
         switch ($this.Mode) {
@@ -201,6 +379,13 @@ class IpDnsLifecycleService {
         return $result
     }
 
+    <#
+    .SYNOPSIS
+    Returns the failure message for a failed work item.
+
+    .OUTPUTS
+    System.String
+    #>
     hidden [string] GetFailureMessage([IpAddressWorkItem] $workItem, [System.Exception] $exception) {
         $result = $null
         switch ($this.Mode) {

@@ -1,4 +1,23 @@
 # Represents a recoverable processing failure with enough context for mailing, journaling, and reporting.
+<#
+.SYNOPSIS
+Represents one failed work item in a normalized operational format.
+
+.DESCRIPTION
+Captures the failing work item, human-readable message, detailed error text,
+optional routing metadata, and an optional deep link back to NetBox.
+
+.NOTES
+Methods:
+- OperationIssue(...) constructor overloads
+- Initialize(...)
+- GetHandlingDepartment()
+- GetHandlingHandler()
+- HasResourceUrl()
+
+.EXAMPLE
+[OperationIssue]::new('Prefix', '10.20.30.0/24', 'Failed', 'Detailed exception')
+#>
 class OperationIssue {
     [datetime] $TimestampUtc
     [string] $WorkItemType
@@ -27,6 +46,12 @@ class OperationIssue {
         $this.Initialize($workItemType, $workItemIdentifier, $message, $details, $issueHandlingContext, $resourceUrl)
     }
 
+    <#
+    .SYNOPSIS
+    Initializes the normalized operation issue.
+    .OUTPUTS
+    System.Void
+    #>
     hidden [void] Initialize(
         [string] $workItemType,
         [string] $workItemIdentifier,
@@ -56,14 +81,32 @@ class OperationIssue {
         $this.ResourceUrl = $resourceUrl
     }
 
+    <#
+    .SYNOPSIS
+    Returns the effective handling department.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetHandlingDepartment() {
         return $this.HandlingContext.GetDepartmentOrDefault()
     }
 
+    <#
+    .SYNOPSIS
+    Returns the effective handling handler.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetHandlingHandler() {
         return $this.HandlingContext.GetHandlerOrDefault()
     }
 
+    <#
+    .SYNOPSIS
+    Indicates whether the issue exposes a deep link.
+    .OUTPUTS
+    System.Boolean
+    #>
     [bool] HasResourceUrl() {
         return -not [string]::IsNullOrWhiteSpace($this.ResourceUrl)
     }

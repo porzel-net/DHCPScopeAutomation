@@ -1,4 +1,26 @@
 # Wraps Jira issue creation and workflow transitions used for manual prerequisite handling.
+<#
+.SYNOPSIS
+Wraps Jira REST operations required by the automation.
+
+.DESCRIPTION
+Handles ticket lookup, status transitions, ticket closure, and prerequisite
+ticket creation so higher layers can work with business intent instead of raw REST calls.
+
+.NOTES
+Methods:
+- JiraClient(credential)
+- GetHeaders()
+- GetTicketKeyFromUrl(jiraUrl)
+- GetTicketStatus(ticketKey)
+- SetTicketStatus(ticketKey, targetStatus)
+- EnsureTicketClosed(jiraUrl)
+- CreatePrerequisiteTicket(workItem, forestShortName, dnsZoneDelegated)
+
+.EXAMPLE
+$client = [JiraClient]::new($jiraCredential)
+$client.GetTicketKeyFromUrl('https://jira.example.test/browse/TCO-7')
+#>
 class JiraClient {
     [string] $BaseUrl
     [AutomationCredential] $Credential
@@ -12,6 +34,12 @@ class JiraClient {
         $this.BaseUrl = $credential.Appliance.TrimEnd('/')
     }
 
+    <#
+    .SYNOPSIS
+    Returns the standard REST headers for Jira.
+    .OUTPUTS
+    System.Collections.Hashtable
+    #>
     hidden [hashtable] GetHeaders() {
         return @{
             Authorization = ('Bearer {0}' -f $this.Credential.GetPlainApiKey())
@@ -19,6 +47,12 @@ class JiraClient {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Extracts the Jira key from a browse URL.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetTicketKeyFromUrl([string] $jiraUrl) {
         if ([string]::IsNullOrWhiteSpace($jiraUrl)) {
             throw [System.ArgumentException]::new('JiraUrl is required.')
@@ -32,12 +66,24 @@ class JiraClient {
         throw [System.ArgumentException]::new("No valid Jira ticket key found in '$jiraUrl'.")
     }
 
+    <#
+    .SYNOPSIS
+    Returns the current workflow status of a ticket.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetTicketStatus([string] $ticketKey) {
         $uri = '{0}/rest/api/2/issue/{1}' -f $this.BaseUrl, $ticketKey
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $this.GetHeaders() -ContentType 'application/json; charset=utf-8' -ErrorAction Stop
         return [string] $response.fields.status.name
     }
 
+    <#
+    .SYNOPSIS
+    Moves a ticket into the requested Jira status.
+    .OUTPUTS
+    System.Void
+    #>
     [void] SetTicketStatus([string] $ticketKey, [string] $targetStatus) {
         $transitionsUri = '{0}/rest/api/2/issue/{1}/transitions?expand=transitions.fields' -f $this.BaseUrl, $ticketKey
         $transitionResponse = Invoke-RestMethod -Uri $transitionsUri -Method Get -Headers $this.GetHeaders() -ContentType 'application/json; charset=utf-8' -ErrorAction Stop
@@ -57,6 +103,12 @@ class JiraClient {
         Invoke-RestMethod -Uri $postUri -Method Post -Headers $this.GetHeaders() -ContentType 'application/json; charset=utf-8' -Body $body -ErrorAction Stop | Out-Null
     }
 
+    <#
+    .SYNOPSIS
+    Ensures that a referenced Jira ticket is closed.
+    .OUTPUTS
+    System.Void
+    #>
     [void] EnsureTicketClosed([string] $jiraUrl) {
         $ticketKey = $this.GetTicketKeyFromUrl($jiraUrl)
         $status = $this.GetTicketStatus($ticketKey)
@@ -71,6 +123,12 @@ class JiraClient {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Creates the Jira ticket for blocked prerequisite work.
+    .OUTPUTS
+    System.String
+    #>
     [string] CreatePrerequisiteTicket([PrefixWorkItem] $workItem, [string] $forestShortName, [bool] $dnsZoneDelegated) {
         $delegationText = 'nicht vorhanden'
         if ($dnsZoneDelegated) {

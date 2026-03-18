@@ -115,5 +115,6 @@ function Start-DhcpScopeAutomation {
         $publicSummaries += Convert-BatchRunSummaryToPublicObject -Summary $summary
     }
 
-    return $publicSummaries
+    # Preserve array shape for callers even when exactly one summary is returned.
+    return ,$publicSummaries
 }

@@ -1,4 +1,20 @@
-# Holds the fully constructed runtime graph for execution and cross-cutting services.
+<#
+.SYNOPSIS
+Represents the fully resolved runtime container for one execution.
+
+.DESCRIPTION
+Holds the environment, recipients, coordinator, and cross-cutting services that
+were assembled by the composition root. The runtime provides a narrow execution
+surface to the public entry point.
+
+.NOTES
+Methods:
+- AutomationRuntime(environment, emailRecipients, coordinator, logService)
+- Execute(sendFailureMail, skipPrefixOnboarding, skipIpDnsOnboarding, skipIpDnsDecommissioning)
+
+.EXAMPLE
+$summaries = $runtime.Execute($true, $false, $false, $false)
+#>
 class AutomationRuntime {
     [EnvironmentContext] $Environment
     [string[]] $EmailRecipients
@@ -35,6 +51,17 @@ class AutomationRuntime {
         $this.LogService = $logService
     }
 
+    <#
+    .SYNOPSIS
+    Executes the configured automation runtime.
+
+    .DESCRIPTION
+    Delegates to the application coordinator while binding in the resolved
+    runtime environment and notification recipients.
+
+    .OUTPUTS
+    BatchRunSummary[]
+    #>
     # Thin runtime facade that binds resolved configuration to the coordinator without exposing object-graph construction to callers.
     [BatchRunSummary[]] Execute(
         [bool] $sendFailureMail,

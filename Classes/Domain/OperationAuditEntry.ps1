@@ -1,4 +1,18 @@
-# Captures a single structured audit event for logs, summaries, and user-facing output.
+<#
+.SYNOPSIS
+Represents one structured audit entry emitted during a batch run.
+
+.DESCRIPTION
+Stores timestamp, severity level, and message text for audit output. This class is
+used by summaries, logging helpers, and public result conversion.
+
+.NOTES
+Methods:
+- OperationAuditEntry(level, message): validates and creates the entry.
+
+.EXAMPLE
+[OperationAuditEntry]::new('Information', 'Prefix completed.')
+#>
 class OperationAuditEntry {
     [datetime] $TimestampUtc
     [string] $Level

@@ -1,4 +1,22 @@
 # Reads flat key-value automation settings from the relative environment file.
+<#
+.SYNOPSIS
+Reads simple key/value configuration from an env-style file.
+
+.DESCRIPTION
+Parses a relative configuration file into an in-memory dictionary and exposes
+strongly validated getters for required values and string arrays.
+
+.NOTES
+Methods:
+- EnvFileConfigurationProvider(filePath)
+- GetValue(keyName, description)
+- GetStringArray(keyName, description)
+
+.EXAMPLE
+$provider = [EnvFileConfigurationProvider]::new('.env')
+$provider.GetValue('Environment', 'Expected one of: dev, test, prod.')
+#>
 class EnvFileConfigurationProvider {
     [string] $Path
     [hashtable] $Values
@@ -26,6 +44,12 @@ class EnvFileConfigurationProvider {
         }
     }
 
+    <#
+    .SYNOPSIS
+    Returns one required configuration value.
+    .OUTPUTS
+    System.String
+    #>
     [string] GetValue([string] $keyName, [string] $description) {
         if ([string]::IsNullOrWhiteSpace($keyName)) {
             throw [System.ArgumentException]::new('KeyName is required.')
@@ -38,6 +62,12 @@ class EnvFileConfigurationProvider {
         return [string] $this.Values[$keyName]
     }
 
+    <#
+    .SYNOPSIS
+    Returns a required comma-separated setting as a normalized array.
+    .OUTPUTS
+    System.String[]
+    #>
     [string[]] GetStringArray([string] $keyName, [string] $description) {
         $rawValue = $this.GetValue($keyName, $description)
         return @($rawValue -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })

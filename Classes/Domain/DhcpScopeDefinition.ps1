@@ -1,4 +1,20 @@
 # Converts a prefix work item into the DHCP-specific configuration needed by the infrastructure adapter.
+<#
+.SYNOPSIS
+Represents the fully derived DHCP scope configuration for one prefix.
+
+.DESCRIPTION
+Converts a business-level prefix work item into the precise DHCP input needed by
+the infrastructure adapter, including range, DNS settings, and exclusions.
+
+.NOTES
+Methods:
+- DhcpScopeDefinition(...)
+- FromPrefixWorkItem(workItem)
+
+.EXAMPLE
+[DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
+#>
 class DhcpScopeDefinition {
     [string] $Name
     [IPv4Subnet] $Subnet
@@ -35,6 +51,17 @@ class DhcpScopeDefinition {
         $this.ExclusionRanges = $exclusionRanges
     }
 
+    <#
+    .SYNOPSIS
+    Builds the DHCP scope definition from a prefix work item.
+
+    .DESCRIPTION
+    Converts prefix-level business data into the exact DHCP adapter input,
+    including calculated ranges and exclusion behavior.
+
+    .OUTPUTS
+    DhcpScopeDefinition
+    #>
     static [DhcpScopeDefinition] FromPrefixWorkItem([PrefixWorkItem] $workItem) {
         if ($null -eq $workItem) {
             throw [System.ArgumentNullException]::new('workItem')
@@ -48,6 +75,7 @@ class DhcpScopeDefinition {
             default { throw [System.InvalidOperationException]::new("Unsupported DHCP type '$($workItem.DHCPType)'.") }
         }
 
+        # The scope name is intentionally denormalized so operators can identify type, network, site, and purpose directly in DHCP.
         $scopeName = '{0} {1} {2} {3}' -f $mappedType, $workItem.PrefixSubnet.Cidr, $workItem.SiteName, $workItem.Description
         $calculatedRange = [DhcpRange]::FromSubnet($workItem.PrefixSubnet, $workItem.DHCPType)
         $exclusions = @()

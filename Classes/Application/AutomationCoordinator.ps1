@@ -1,4 +1,20 @@
-# Coordinates the enabled application services for one automation run.
+<#
+.SYNOPSIS
+Coordinates all enabled batch use cases for one automation run.
+
+.DESCRIPTION
+Acts as the facade over the application layer. The caller invokes one run
+operation while the coordinator sequences prefix onboarding, IP DNS onboarding,
+IP DNS decommissioning, and optional failure notification handling.
+
+.NOTES
+Methods:
+- AutomationCoordinator(prefixOnboardingService, ipDnsOnboardingService, ipDnsDecommissioningService, batchNotificationService)
+- Run(environment, emailRecipients, sendFailureMail, skipPrefixOnboarding, skipIpDnsOnboarding, skipIpDnsDecommissioning)
+
+.EXAMPLE
+$summaries = $coordinator.Run($environment, $recipients, $true, $false, $false, $false)
+#>
 class AutomationCoordinator {
     [PrefixOnboardingService] $PrefixOnboardingService
     [IpDnsLifecycleService] $IpDnsOnboardingService
@@ -17,6 +33,39 @@ class AutomationCoordinator {
         $this.BatchNotificationService = $batchNotificationService
     }
 
+    <#
+    .SYNOPSIS
+    Executes all enabled application workflows for the current runtime.
+
+    .DESCRIPTION
+    Invokes the configured batch services in their operational order and,
+    optionally, sends a grouped failure summary mail. Notification failures are
+    converted into an additional batch summary so the run remains observable.
+
+    .PARAMETER environment
+    Runtime environment that scopes the work item queries and infrastructure behavior.
+
+    .PARAMETER emailRecipients
+    Recipients for grouped failure notifications.
+
+    .PARAMETER sendFailureMail
+    Controls whether the failure summary mail should be sent after processing.
+
+    .PARAMETER skipPrefixOnboarding
+    Skips prefix onboarding when set to `$true`.
+
+    .PARAMETER skipIpDnsOnboarding
+    Skips IP DNS onboarding when set to `$true`.
+
+    .PARAMETER skipIpDnsDecommissioning
+    Skips IP DNS decommissioning when set to `$true`.
+
+    .OUTPUTS
+    BatchRunSummary[]
+
+    .EXAMPLE
+    $coordinator.Run($environment, @('ops@example.com'), $true, $false, $true, $false)
+    #>
     # Facade over the enabled use cases. The caller sees one run method while the coordinator sequences the internal workflows.
     [BatchRunSummary[]] Run(
         [EnvironmentContext] $environment,

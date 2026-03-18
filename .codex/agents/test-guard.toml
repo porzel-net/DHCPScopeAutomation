@@ -1,0 +1,14 @@
+model = "gpt-5.1-codex-mini"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+model_verbosity = "low"
+developer_instructions = """
+Validate the changed behavior with the narrowest reliable checks.
+Prefer targeted tests, linters, type checks, or reproduction commands over full-suite runs unless the parent asks otherwise.
+Report:
+- commands executed
+- pass or fail result
+- exact failing output summary
+- remaining validation gaps
+Do not edit source code.
+"""

@@ -1,0 +1,42 @@
+name: Windows PowerShell Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-powershell-51:
+    name: Test With Windows PowerShell 5.1
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Show Windows PowerShell Version
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+
+      - name: Install Test Dependencies
+        shell: powershell
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Import Module
+        shell: powershell
+        run: |
+          Import-Module .\DHCPScopeAutomation.psd1 -Force
+          Get-Command Start-DhcpScopeAutomation
+
+      - name: Run Test Suite
+        shell: powershell
+        run: |
+          .\Tests\Run-Tests.ps1
+
+      - name: Run PowerShell 5.1 Compatibility Checks
+        shell: powershell
+        run: |
+          .\Scripts\Test-PowerShell51Compatibility.ps1

@@ -111,6 +111,7 @@ Describe 'Infrastructure adapters and module internals' {
                                         dhcp_type                        = 'dhcp_dynamic'
                                         domain                           = 'de.mtu.corp'
                                         default_gateway                  = [pscustomobject]@{ id = 101 }
+                                        routing_type                     = 'routed'
                                         ad_sites_and_services_ticket_url = 'https://jira.example.test/browse/TCO-7'
                                     }
                                     scope         = [pscustomobject]@{
@@ -149,6 +150,63 @@ Describe 'Infrastructure adapters and module internals' {
                 $items[0].DefaultGatewayAddress.Value | Should -Be '10.20.30.254'
                 $items[0].ValuemationSiteMandant | Should -Be 'MUC'
                 $items[0].ExistingTicketUrl | Should -Be 'https://jira.example.test/browse/TCO-7'
+                $items[0].RoutingType | Should -Be 'routed'
+            }
+
+            It 'maps not_routed no_dhcp prefixes without resolving a default gateway' {
+                $credential = [AutomationCredential]::new('NetBox', 'https://netbox.example.test', (ConvertTo-SecureString 'secret' -AsPlainText -Force))
+                $client = [NetBoxClient]::new($credential)
+                $environment = [EnvironmentContext]::new('prod')
+
+                function Global:Invoke-RestMethod {
+                    param($Uri)
+
+                    if (
+                        $Uri -match '/api/ipam/prefixes/\?' -and
+                        $Uri -match 'status=onboarding_open_dns_dhcp' -and
+                        $Uri -match 'cf_domain=de\.mtu\.corp'
+                    ) {
+                        return [pscustomobject]@{
+                            results = @(
+                                [pscustomobject]@{
+                                    id            = 8
+                                    prefix        = '10.20.38.0/24'
+                                    description   = 'Transitless'
+                                    custom_fields = [pscustomobject]@{
+                                        dhcp_type                        = 'no_dhcp'
+                                        domain                           = 'de.mtu.corp'
+                                        default_gateway                  = $null
+                                        routing_type                     = 'not_routed'
+                                        ad_sites_and_services_ticket_url = $null
+                                    }
+                                    scope         = [pscustomobject]@{
+                                        id   = 17
+                                        name = 'MUC'
+                                    }
+                                }
+                            )
+                            next    = $null
+                        }
+                    }
+
+                    if ($Uri -match '/api/dcim/sites/17/$') {
+                        return [pscustomobject]@{
+                            custom_fields = [pscustomobject]@{
+                                valuemation_site_mandant = 'MUC'
+                            }
+                        }
+                    }
+
+                    throw "Unexpected URI: $Uri"
+                }
+
+                $items = $client.GetOpenPrefixWorkItems($environment)
+
+                $items.Count | Should -Be 1
+                $items[0].RequiresDefaultGateway() | Should -BeFalse
+                $items[0].DefaultGatewayId | Should -Be 0
+                $items[0].DefaultGatewayAddress | Should -BeNullOrEmpty
+                $items[0].RoutingType | Should -Be 'not_routed'
             }
 
             It 'prefers the most specific prefix match for an IP address lookup' {
@@ -462,7 +520,7 @@ Describe 'Infrastructure adapters and module internals' {
                 $definition = [DhcpScopeDefinition]::FromPrefixWorkItem(
                     [PrefixWorkItem]::new(
                         1, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                        'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                        'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
                     )
                 )
                 $script:dhcpCalls = [System.Collections.Generic.List[string]]::new()
@@ -497,7 +555,7 @@ Describe 'Infrastructure adapters and module internals' {
                 $definition = [DhcpScopeDefinition]::FromPrefixWorkItem(
                     [PrefixWorkItem]::new(
                         1, '10.20.30.0/23', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                        'MUC', 7, 101, '10.20.31.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                        'MUC', 7, 101, '10.20.31.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
                     )
                 )
                 $script:exclusionModes = [System.Collections.Generic.List[string]]::new()

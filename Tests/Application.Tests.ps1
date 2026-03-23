@@ -301,7 +301,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:activeDirectory.SubnetSiteValue = $null
             $workItem = [PrefixWorkItem]::new(
                 1, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $result = $script:prerequisites.Evaluate($workItem, $script:environment)
@@ -317,7 +317,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:dns.HasDelegation = $true
             $workItem = [PrefixWorkItem]::new(
                 1, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-9'
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-9', 'routed'
             )
 
             $result = $script:prerequisites.Evaluate($workItem, $script:environment)
@@ -333,7 +333,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
         It 'applies gateway DNS through the facade boundary for prefixes' {
             $workItem = [PrefixWorkItem]::new(
                 7, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $script:gatewayDns.EnsurePrefixGatewayDns($workItem)
@@ -422,7 +422,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 11, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))
@@ -450,7 +450,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 12, '10.20.31.0/24', 'Office', 'no_dhcp', 'de.mtu.corp',
-                'MUC', 7, 102, '10.20.31.254', 'gw102031.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 102, '10.20.31.254', 'gw102031.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))
@@ -459,6 +459,36 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:gatewayDns.PrefixCalls | Should -Contain '10.20.31.0/24'
             $script:netBox.MarkedPrefixes | Should -Contain 12
             $script:dhcp.EnsuredScopes.Count | Should -Be 0
+        }
+
+        It 'completes not_routed no_dhcp prefixes without gateway DNS or a default gateway' {
+            $script:activeDirectory.SubnetSiteValue = 'MUC'
+            $script:dns.ReverseZoneName = '38.20.10.in-addr.arpa'
+            $script:dns.HasDelegation = $true
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $script:prerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                121, '10.20.38.0/24', 'Transitless', 'no_dhcp', 'de.mtu.corp',
+                'MUC', 7, 0, $null, $null, 'MUC', $null, 'not_routed'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 1
+            $summary.FailureCount | Should -Be 0
+            $script:gatewayDns.PrefixCalls | Should -Not -Contain '10.20.38.0/24'
+            $script:netBox.MarkedPrefixes | Should -Contain 121
+            $script:dhcp.EnsuredScopes.Count | Should -Be 0
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Gateway DNS skipped'
         }
 
         It 'completes DHCP backed prefixes through the provisioning workflow' {
@@ -478,7 +508,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 13, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 103, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 103, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))
@@ -509,7 +539,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 14, '10.20.32.0/24', 'Office', 'no_dhcp', 'de.mtu.corp',
-                'MUC', 7, 104, '10.20.32.254', 'gw102032.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 104, '10.20.32.254', 'gw102032.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))
@@ -634,7 +664,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:netBox.PrefixItems = @(
                 [PrefixWorkItem]::new(
                     24, '10.20.33.0/24', 'Office', 'no_dhcp', 'de.mtu.corp',
-                    'MUC', 7, 105, '10.20.33.254', 'gw102033.de.mtu.corp', 'MUC', $null
+                    'MUC', 7, 105, '10.20.33.254', 'gw102033.de.mtu.corp', 'MUC', $null, 'routed'
                 )
             )
 
@@ -654,7 +684,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:netBox.PrefixItems = @(
                 [PrefixWorkItem]::new(
                     31, '10.20.34.0/24', 'Office', 'no_dhcp', 'de.mtu.corp',
-                    'MUC', 7, 106, '10.20.34.254', 'gw102034.de.mtu.corp', 'MUC', $null
+                    'MUC', 7, 106, '10.20.34.254', 'gw102034.de.mtu.corp', 'MUC', $null, 'routed'
                 )
             )
             $service = [PrefixOnboardingService]::new(
@@ -690,7 +720,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 32, '10.20.35.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 107, '10.20.35.254', 'gw102035.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-32'
+                'MUC', 7, 107, '10.20.35.254', 'gw102035.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-32', 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))
@@ -718,7 +748,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 33, '10.20.36.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 108, '10.20.36.254', 'gw102036.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-33'
+                'MUC', 7, 108, '10.20.36.254', 'gw102036.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-33', 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))
@@ -745,7 +775,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 34, '10.20.37.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 109, '10.20.37.1', 'gw102037.de.mtu.corp', 'MUC', $null
+                'MUC', 7, 109, '10.20.37.1', 'gw102037.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))

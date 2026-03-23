@@ -122,7 +122,7 @@ Describe 'Domain and supporting services' {
             It 'creates strict exclusions for a /24 dynamic scope' {
                 $workItem = [PrefixWorkItem]::new(
                     1, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                    'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                    'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
                 )
                 $definition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
 
@@ -134,7 +134,7 @@ Describe 'Domain and supporting services' {
             It 'creates non-strict exclusions for a /23 dynamic scope' {
                 $workItem = [PrefixWorkItem]::new(
                     1, '10.20.30.0/23', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                    'MUC', 7, 101, '10.20.31.254', 'gw102031.de.mtu.corp', 'MUC', $null
+                    'MUC', 7, 101, '10.20.31.254', 'gw102031.de.mtu.corp', 'MUC', $null, 'routed'
                 )
                 $definition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
 
@@ -145,7 +145,7 @@ Describe 'Domain and supporting services' {
             It 'creates a single strict exclusion for a static scope' {
                 $workItem = [PrefixWorkItem]::new(
                     1, '10.20.30.0/24', 'Office', 'dhcp_static', 'de.mtu.corp',
-                    'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                    'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
                 )
                 $definition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
 
@@ -166,7 +166,7 @@ Describe 'Domain and supporting services' {
             It 'rejects unsupported DHCP types during scope creation' {
                 $workItem = [PrefixWorkItem]::new(
                     1, '10.20.30.0/24', 'Office', 'dhcp_unknown', 'de.mtu.corp',
-                    'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null
+                    'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
                 )
 
                 { [DhcpScopeDefinition]::FromPrefixWorkItem($workItem) } | Should -Throw
@@ -177,11 +177,22 @@ Describe 'Domain and supporting services' {
             It 'appends the domain to gateway dns names when needed' {
                 $workItem = [PrefixWorkItem]::new(
                     1, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                    'MUC', 7, 101, '10.20.30.254', 'gw102030', 'MUC', $null
+                    'MUC', 7, 101, '10.20.30.254', 'gw102030', 'MUC', $null, 'routed'
                 )
 
                 $workItem.GetGatewayFqdn() | Should -Be 'gw102030.de.mtu.corp'
                 $workItem.GetIdentifier() | Should -Be '10.20.30.0/24'
+            }
+
+            It 'allows no_dhcp prefixes without a default gateway when routing_type is not_routed' {
+                $workItem = [PrefixWorkItem]::new(
+                    1, '10.20.38.0/24', 'Transitless', 'no_dhcp', 'de.mtu.corp',
+                    'MUC', 7, 0, $null, $null, 'MUC', $null, 'not_routed'
+                )
+
+                $workItem.RequiresDefaultGateway() | Should -BeFalse
+                $workItem.DefaultGatewayAddress | Should -BeNullOrEmpty
+                $workItem.GetGatewayFqdn() | Should -BeNullOrEmpty
             }
 
             It 'returns fqdn branches for ip work items' {

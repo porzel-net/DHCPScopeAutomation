@@ -14,7 +14,7 @@ Methods:
 - GetIdentifier()
 
 .EXAMPLE
-[PrefixWorkItem]::new(7, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp', 'MUC', 17, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null)
+[PrefixWorkItem]::new(7, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp', 'MUC', 17, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed')
 #>
 class PrefixWorkItem {
     [int] $Id
@@ -29,6 +29,7 @@ class PrefixWorkItem {
     [string] $DnsName
     [string] $ValuemationSiteMandant
     [string] $ExistingTicketUrl
+    [string] $RoutingType
 
     PrefixWorkItem(
         [int] $id,
@@ -42,7 +43,8 @@ class PrefixWorkItem {
         [string] $defaultGatewayAddress,
         [string] $dnsName,
         [string] $valuemationSiteMandant,
-        [string] $existingTicketUrl
+        [string] $existingTicketUrl,
+        [string] $routingType
     ) {
         if ($id -le 0) { throw [System.ArgumentOutOfRangeException]::new('id', 'Id must be positive.') }
         if ([string]::IsNullOrWhiteSpace($description)) { throw [System.ArgumentException]::new('Description is required.') }
@@ -50,8 +52,6 @@ class PrefixWorkItem {
         if ([string]::IsNullOrWhiteSpace($domain)) { throw [System.ArgumentException]::new('Domain is required.') }
         if ([string]::IsNullOrWhiteSpace($siteName)) { throw [System.ArgumentException]::new('SiteName is required.') }
         if ($siteId -le 0) { throw [System.ArgumentOutOfRangeException]::new('siteId', 'SiteId must be positive.') }
-        if ($defaultGatewayId -le 0) { throw [System.ArgumentOutOfRangeException]::new('defaultGatewayId', 'DefaultGatewayId must be positive.') }
-        if ([string]::IsNullOrWhiteSpace($dnsName)) { throw [System.ArgumentException]::new('DnsName is required.') }
         if ([string]::IsNullOrWhiteSpace($valuemationSiteMandant)) { throw [System.ArgumentException]::new('ValuemationSiteMandant is required.') }
 
         $this.Id = $id
@@ -61,11 +61,48 @@ class PrefixWorkItem {
         $this.Domain = $domain.Trim().ToLowerInvariant()
         $this.SiteName = $siteName.Trim()
         $this.SiteId = $siteId
+        $this.ValuemationSiteMandant = $valuemationSiteMandant.Trim()
+        $this.ExistingTicketUrl = $existingTicketUrl
+        $this.RoutingType = $this.NormalizeRoutingType($routingType)
+        $this.SetGatewayConfiguration($defaultGatewayId, $defaultGatewayAddress, $dnsName)
+    }
+
+    hidden [bool] IsNotRoutedNoDhcp() {
+        return $this.DHCPType.ToLowerInvariant() -eq 'no_dhcp' -and $this.RoutingType -eq 'not_routed'
+    }
+
+    hidden [string] NormalizeRoutingType([string] $routingType) {
+        if ([string]::IsNullOrWhiteSpace($routingType)) {
+            return 'routed'
+        }
+
+        return $routingType.Trim().ToLowerInvariant()
+    }
+
+    hidden [void] SetGatewayConfiguration(
+        [int] $defaultGatewayId,
+        [string] $defaultGatewayAddress,
+        [string] $dnsName
+    ) {
+        if (-not $this.RequiresDefaultGateway()) {
+            return
+        }
+
+        if ($defaultGatewayId -le 0) { throw [System.ArgumentOutOfRangeException]::new('defaultGatewayId', 'DefaultGatewayId must be positive.') }
+        if ([string]::IsNullOrWhiteSpace($defaultGatewayAddress)) { throw [System.ArgumentException]::new('DefaultGatewayAddress is required.') }
+        if ([string]::IsNullOrWhiteSpace($dnsName)) { throw [System.ArgumentException]::new('DnsName is required.') }
+
         $this.DefaultGatewayId = $defaultGatewayId
         $this.DefaultGatewayAddress = [IPv4Address]::new($defaultGatewayAddress)
         $this.DnsName = $dnsName.Trim()
-        $this.ValuemationSiteMandant = $valuemationSiteMandant.Trim()
-        $this.ExistingTicketUrl = $existingTicketUrl
+    }
+
+    [bool] RequiresDefaultGateway() {
+        return -not $this.IsNotRoutedNoDhcp()
+    }
+
+    [bool] ShouldEnsureGatewayDns() {
+        return $this.RequiresDefaultGateway()
     }
 
     <#
@@ -75,6 +112,10 @@ class PrefixWorkItem {
     System.String
     #>
     [string] GetGatewayFqdn() {
+        if (-not $this.ShouldEnsureGatewayDns() -or [string]::IsNullOrWhiteSpace($this.DnsName)) {
+            return $null
+        }
+
         if ($this.DnsName.ToLowerInvariant().EndsWith($this.Domain.ToLowerInvariant())) {
             return $this.DnsName
         }

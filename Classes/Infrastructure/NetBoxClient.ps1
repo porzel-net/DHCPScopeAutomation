@@ -158,27 +158,51 @@ class NetBoxClient {
         $workItems = @()
 
         foreach ($prefix in $prefixes) {
-            # NetBox stores some required fields behind linked objects, so resolve them before constructing the work item.
-            $defaultGateway = $this.GetIpAddressById([int] $prefix.custom_fields.default_gateway.id)
-            $site = $this.GetSiteById([int] $prefix.scope.id)
-
-            $workItems += [PrefixWorkItem]::new(
-                [int] $prefix.id,
-                [string] $prefix.prefix,
-                [string] $prefix.description,
-                [string] $prefix.custom_fields.dhcp_type,
-                [string] $prefix.custom_fields.domain,
-                [string] $prefix.scope.name,
-                [int] $prefix.scope.id,
-                [int] $prefix.custom_fields.default_gateway.id,
-                [string] (($defaultGateway.address -split '/')[0]),
-                [string] $defaultGateway.dns_name,
-                [string] $site.custom_fields.valuemation_site_mandant,
-                [string] $prefix.custom_fields.ad_sites_and_services_ticket_url
-            )
+            $workItems += $this.ConvertPrefixToWorkItem($prefix)
         }
 
         return $workItems
+    }
+
+    hidden [PrefixWorkItem] ConvertPrefixToWorkItem([pscustomobject] $prefix) {
+        $gateway = $this.ResolveDefaultGatewayConfiguration($prefix)
+        $site = $this.GetSiteById([int] $prefix.scope.id)
+
+        return [PrefixWorkItem]::new(
+            [int] $prefix.id,
+            [string] $prefix.prefix,
+            [string] $prefix.description,
+            [string] $prefix.custom_fields.dhcp_type,
+            [string] $prefix.custom_fields.domain,
+            [string] $prefix.scope.name,
+            [int] $prefix.scope.id,
+            [int] $gateway.Id,
+            [string] $gateway.Address,
+            [string] $gateway.DnsName,
+            [string] $site.custom_fields.valuemation_site_mandant,
+            [string] $prefix.custom_fields.ad_sites_and_services_ticket_url,
+            [string] $prefix.custom_fields.routing_type
+        )
+    }
+
+    hidden [pscustomobject] ResolveDefaultGatewayConfiguration([pscustomobject] $prefix) {
+        # NetBox stores gateway data behind a linked object, so keep that lookup isolated from the loop-level mapping.
+        if ($null -eq $prefix.custom_fields.default_gateway -or $null -eq $prefix.custom_fields.default_gateway.id) {
+            return [pscustomobject]@{
+                Id      = 0
+                Address = $null
+                DnsName = $null
+            }
+        }
+
+        $defaultGatewayId = [int] $prefix.custom_fields.default_gateway.id
+        $defaultGateway = $this.GetIpAddressById($defaultGatewayId)
+
+        return [pscustomobject]@{
+            Id      = $defaultGatewayId
+            Address = [string] (($defaultGateway.address -split '/')[0])
+            DnsName = [string] $defaultGateway.dns_name
+        }
     }
 
     <#

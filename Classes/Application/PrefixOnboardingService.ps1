@@ -196,9 +196,15 @@ class PrefixOnboardingService {
     creating a DHCP scope.
     #>
     hidden [void] CompleteNoDhcpPrefix([PrefixWorkItem] $workItem, [string[]] $lines, [BatchRunSummary] $summary) {
-        $this.GatewayDnsService.EnsurePrefixGatewayDns($workItem)
+        if ($workItem.ShouldEnsureGatewayDns()) {
+            $this.GatewayDnsService.EnsurePrefixGatewayDns($workItem)
+            $lines += 'Gateway DNS updated.'
+        }
+        else {
+            $lines += 'Gateway DNS skipped because the prefix is marked as not_routed.'
+        }
+
         $this.NetBoxClient.MarkPrefixOnboardingDone($workItem.Id)
-        $lines += 'Gateway DNS updated.'
         $lines += 'Prefix status updated to onboarding_done_dns_dhcp.'
         $lines = $this.WriteExecutionLog($workItem, $lines)
         $this.JournalService.WritePrefixInfo($workItem, $lines)

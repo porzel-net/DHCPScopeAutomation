@@ -30,7 +30,8 @@ function New-TestPrefixWorkItem {
         [string] $DefaultGatewayAddress = '10.20.30.254',
         [string] $DnsName = 'gw102030.de.mtu.corp',
         [string] $ValuemationSiteMandant = 'MUC',
-        [string] $ExistingTicketUrl = $null
+        [string] $ExistingTicketUrl = $null,
+        [string] $RoutingType = 'routed'
     )
 
     return [PrefixWorkItem]::new(
@@ -45,7 +46,8 @@ function New-TestPrefixWorkItem {
         $DefaultGatewayAddress,
         $DnsName,
         $ValuemationSiteMandant,
-        $ExistingTicketUrl
+        $ExistingTicketUrl,
+        $RoutingType
     )
 }
 

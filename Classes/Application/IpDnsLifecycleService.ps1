@@ -167,9 +167,11 @@ class IpDnsLifecycleService {
         $lines += ('Prefix subnet: {0}' -f $workItem.PrefixSubnet.Cidr)
         if (-not [string]::IsNullOrWhiteSpace($workItem.DnsName)) {
             $lines += ('DNS name: {0}' -f $workItem.DnsName)
+            $lines += ('DNS FQDN: {0}' -f $workItem.GetFqdn())
         }
         else {
             $lines += 'DNS name: <none>'
+            $lines += 'DNS FQDN: <none>'
         }
         $summary.AddAudit('Debug', "Starting $($this.GetLifecycleDisplayName()) work item '$($workItem.GetIdentifier())'.")
 
@@ -178,6 +180,7 @@ class IpDnsLifecycleService {
             $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet)
             $lines += ('Selected domain controller: {0}' -f $dnsContext.DomainController)
             $lines += ('Resolved reverse zone: {0}' -f $dnsContext.ReverseZone)
+            $lines += $this.GetDnsActionPlanLine($workItem, $dnsContext)
             $summary.AddAudit('Debug', "Resolved DNS context for IP '$($workItem.GetIdentifier())': DC='$($dnsContext.DomainController)', ReverseZone='$($dnsContext.ReverseZone)'.")
             $this.ExecuteDnsLifecycle($workItem)
             $lines += $this.GetDnsLifecycleResultLine()
@@ -274,6 +277,7 @@ class IpDnsLifecycleService {
     ) {
         $message = $this.GetFailureMessage($workItem, $exception)
         $lines += $message
+        $lines += ('Exception type: {0}' -f $exception.GetType().FullName)
         $lines = $this.WriteExecutionLog($workItem, $lines)
 
         try {
@@ -377,6 +381,32 @@ class IpDnsLifecycleService {
             'onboarding' { $result = 'DNS records ensured.'; break }
             'decommissioning' { $result = 'DNS records removed.'; break }
             default { throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.") }
+        }
+
+        return $result
+    }
+
+    <#
+    .SYNOPSIS
+    Returns a descriptive line of the planned DNS action for journaling.
+
+    .OUTPUTS
+    System.String
+    #>
+    hidden [string] GetDnsActionPlanLine([IpAddressWorkItem] $workItem, [DnsExecutionContext] $dnsContext) {
+        $result = $null
+        switch ($this.Mode) {
+            'onboarding' {
+                $result = ('Planned DNS action: ensure A/PTR for IP {0} (FQDN={1}) in zone {2} using DC {3} and reverse zone {4}.' -f $workItem.GetIdentifier(), $workItem.GetFqdn(), $workItem.Domain, $dnsContext.DomainController, $dnsContext.ReverseZone)
+                break
+            }
+            'decommissioning' {
+                $result = ('Planned DNS action: remove A/PTR for IP {0} in zone {1} using DC {2} and reverse zone {3}.' -f $workItem.GetIdentifier(), $workItem.Domain, $dnsContext.DomainController, $dnsContext.ReverseZone)
+                break
+            }
+            default {
+                throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.")
+            }
         }
 
         return $result

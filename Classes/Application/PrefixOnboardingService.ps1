@@ -201,6 +201,7 @@ class PrefixOnboardingService {
             $forestShortName = $this.ActiveDirectoryAdapter.GetForestShortName($workItem.Domain)
             $lines += 'Prerequisites blocked; creating Jira prerequisite ticket.'
             $lines += ('Resolved forest short name: {0}' -f $forestShortName)
+            $lines += ('Reverse DNS delegation detected: {0}' -f $evaluation.HasDnsDelegation)
             $ticketUrl = $this.JiraClient.CreatePrerequisiteTicket($workItem, $forestShortName, $evaluation.HasDnsDelegation)
             $this.NetBoxClient.UpdatePrefixTicketUrl($workItem.Id, $ticketUrl)
             $lines += 'Created Jira ticket {0}' -f $ticketUrl
@@ -213,6 +214,9 @@ class PrefixOnboardingService {
 
         $message = ($evaluation.Reasons -join ' ')
         $lines += 'Prerequisites blocked; existing Jira ticket detected, onboarding remains blocked.'
+        if (-not [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)) {
+            $lines += ('Existing Jira ticket: {0}' -f $workItem.ExistingTicketUrl)
+        }
         if ([string]::IsNullOrWhiteSpace($message)) {
             $message = 'Prefix prerequisites are not satisfied.'
         }
@@ -270,6 +274,19 @@ class PrefixOnboardingService {
         $lines += ('Calculated DHCP range: {0} - {1}' -f $scopeDefinition.Range.StartAddress.Value, $scopeDefinition.Range.EndAddress.Value)
         $lines += ('Calculated DHCP gateway: {0}' -f $scopeDefinition.Range.GatewayAddress.Value)
         $lines += ('Calculated DHCP broadcast: {0}' -f $scopeDefinition.Range.BroadcastAddress.Value)
+        $lines += ('Calculated DHCP lease duration (days): {0}' -f $scopeDefinition.LeaseDurationDays)
+        $lines += ('Calculated DHCP dynamic DNS enabled: {0}' -f $scopeDefinition.ConfigureDynamicDns)
+        $exclusionRanges = @($scopeDefinition.ExclusionRanges)
+        $lines += ('Calculated DHCP exclusion ranges: {0}' -f $exclusionRanges.Count)
+        if ($exclusionRanges.Count -eq 0) {
+            $lines += 'Calculated DHCP exclusion range details: <none>'
+        }
+        else {
+            foreach ($range in $exclusionRanges) {
+                $rangeMode = if ($range.MustSucceed) { 'mandatory' } else { 'best-effort' }
+                $lines += ('Calculated DHCP exclusion range: {0} - {1} ({2})' -f $range.StartAddress.Value, $range.EndAddress.Value, $rangeMode)
+            }
+        }
 
         if ($scopeDefinition.Range.GatewayAddress.Value -ne $workItem.DefaultGatewayAddress.Value) {
             throw [System.InvalidOperationException]::new(
@@ -284,7 +301,7 @@ class PrefixOnboardingService {
         $summary.AddAudit('Debug', "Selected DHCP server '$selectedServer' for prefix '$($workItem.GetIdentifier())' (Environment='$($environment.Name)', AdSite='$($evaluation.ObservedAdSite)').")
 
         $this.DhcpServerAdapter.EnsureScope($selectedServer, $scopeDefinition)
-        $lines += 'DHCP scope ensured.'
+        $lines += ('DHCP scope ensured on server {0}.' -f $selectedServer)
 
         $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet)
         $lines += ('Gateway DNS context: DC={0}, ReverseZone={1}' -f $dnsContext.DomainController, $dnsContext.ReverseZone)
@@ -293,7 +310,7 @@ class PrefixOnboardingService {
         $lines += 'Gateway DNS updated.'
 
         $this.DhcpServerAdapter.EnsureScopeFailover($selectedServer, $scopeDefinition.Subnet)
-        $lines += 'Failover linkage ensured.'
+        $lines += ('Failover linkage ensured on server {0} for scope {1}.' -f $selectedServer, $scopeDefinition.Subnet.Cidr)
 
         $this.NetBoxClient.MarkPrefixOnboardingDone($workItem.Id)
         $lines += 'Prefix status updated to onboarding_done_dns_dhcp.'
@@ -320,6 +337,7 @@ class PrefixOnboardingService {
     ) {
         $message = "Failed to process prefix '$($workItem.GetIdentifier())'. $($exception.Message)"
         $lines += $message
+        $lines += ('Exception type: {0}' -f $exception.GetType().FullName)
         $lines = $this.WriteExecutionLog($workItem, $lines)
 
         try {

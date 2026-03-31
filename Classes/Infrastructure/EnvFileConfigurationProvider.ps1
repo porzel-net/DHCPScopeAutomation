@@ -30,6 +30,7 @@ class EnvFileConfigurationProvider {
         $this.Values = @{}
 
         if (Test-Path -Path $this.Path) {
+            Write-Verbose -Message ("Loading environment configuration from '{0}'." -f $this.Path)
             foreach ($line in Get-Content -Path $this.Path) {
                 if ([string]::IsNullOrWhiteSpace($line)) { continue }
                 if ($line.TrimStart().StartsWith('#')) { continue }
@@ -39,8 +40,14 @@ class EnvFileConfigurationProvider {
                     $key = $parts[0].Trim()
                     $value = $parts[1].Trim()
                     $this.Values[$key] = $value
+                    Write-Debug -Message ("Loaded configuration key '{0}' from '{1}'." -f $key, $this.Path)
                 }
             }
+
+            Write-Verbose -Message ("Loaded {0} configuration value(s) from '{1}'." -f $this.Values.Count, $this.Path)
+        }
+        else {
+            Write-Verbose -Message ("Environment configuration file '{0}' was not found." -f $this.Path)
         }
     }
 
@@ -59,6 +66,7 @@ class EnvFileConfigurationProvider {
             throw [System.InvalidOperationException]::new("Environment value '$keyName' is missing. $description")
         }
 
+        Write-Debug -Message ("Resolved required configuration key '{0}'." -f $keyName)
         return [string] $this.Values[$keyName]
     }
 
@@ -70,6 +78,8 @@ class EnvFileConfigurationProvider {
     #>
     [string[]] GetStringArray([string] $keyName, [string] $description) {
         $rawValue = $this.GetValue($keyName, $description)
-        return @($rawValue -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $resolvedValues = @($rawValue -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        Write-Debug -Message ("Resolved configuration list '{0}' with {1} item(s)." -f $keyName, $resolvedValues.Count)
+        return $resolvedValues
     }
 }

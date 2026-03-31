@@ -35,10 +35,12 @@ class SmtpMailClient {
     #>
     [void] SendHtmlMail([string[]] $recipients, [string] $subject, [string] $htmlBody) {
         if (-not $recipients) {
+            Write-Verbose -Message 'No mail recipients provided; SMTP delivery is skipped.'
             return
         }
 
         $smtpServer = ('smtpmail.{0}' -f $this.ActiveDirectoryAdapter.GetDomainDnsRoot())
+        Write-Verbose -Message ("Sending SMTP mail via '{0}' to {1} recipient(s) with subject '{2}'." -f $smtpServer, @($recipients).Count, $subject)
         Send-MailMessage -From 'reports@mtu.de' -To $recipients -Subject $subject -Body $htmlBody -BodyAsHtml -SmtpServer $smtpServer -ErrorAction Stop
     }
 }

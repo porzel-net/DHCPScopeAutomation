@@ -50,11 +50,13 @@ class BatchNotificationService {
         $issues = @()
 
         foreach ($summary in @($summaries)) {
+            Write-Debug -Message ("Collecting issues from summary '{0}' (count={1})." -f $summary.ProcessName, @($summary.Issues).Count)
             foreach ($issue in @($summary.Issues)) {
                 $issues = @($issues + $issue)
             }
         }
 
+        Write-Verbose -Message ("Collected {0} issue(s) across {1} summary/summaries." -f @($issues).Count, @($summaries).Count)
         return $issues
     }
 
@@ -77,17 +79,21 @@ class BatchNotificationService {
     $service.SendFailureSummary(@('noc@example.com'), $summaries)
     #>
     [void] SendFailureSummary([string[]] $recipients, [BatchRunSummary[]] $summaries) {
+        Write-Verbose -Message ("Preparing failure summary mail for {0} recipient(s)." -f @($recipients).Count)
         $issues = $this.CollectIssues($summaries)
 
         if (-not $issues) {
+            Write-Verbose -Message 'No issues found; failure summary mail is skipped.'
             return
         }
 
         $body = $this.MailFormatter.BuildFailureSummaryBody($issues)
         if ([string]::IsNullOrWhiteSpace($body)) {
+            Write-Warning -Message 'Failure summary mail body is empty; mail delivery is skipped.'
             return
         }
 
+        Write-Verbose -Message ("Sending failure summary mail with {0} issue(s)." -f @($issues).Count)
         $this.MailClient.SendHtmlMail($recipients, 'DHCPScopeAutomation', $body)
     }
 }

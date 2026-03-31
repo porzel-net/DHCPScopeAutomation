@@ -74,6 +74,7 @@ class JiraClient {
     #>
     [string] GetTicketStatus([string] $ticketKey) {
         $uri = '{0}/rest/api/2/issue/{1}' -f $this.BaseUrl, $ticketKey
+        Write-Verbose -Message ("Loading Jira status for ticket '{0}'." -f $ticketKey)
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $this.GetHeaders() -ContentType 'application/json; charset=utf-8' -ErrorAction Stop
         return [string] $response.fields.status.name
     }
@@ -85,6 +86,7 @@ class JiraClient {
     System.Void
     #>
     [void] SetTicketStatus([string] $ticketKey, [string] $targetStatus) {
+        Write-Verbose -Message ("Setting Jira ticket '{0}' to status '{1}'." -f $ticketKey, $targetStatus)
         $transitionsUri = '{0}/rest/api/2/issue/{1}/transitions?expand=transitions.fields' -f $this.BaseUrl, $ticketKey
         $transitionResponse = Invoke-RestMethod -Uri $transitionsUri -Method Get -Headers $this.GetHeaders() -ContentType 'application/json; charset=utf-8' -ErrorAction Stop
         $transition = $transitionResponse.transitions | Where-Object { $_.name -eq $targetStatus } | Select-Object -First 1
@@ -101,6 +103,7 @@ class JiraClient {
 
         $postUri = '{0}/rest/api/2/issue/{1}/transitions' -f $this.BaseUrl, $ticketKey
         Invoke-RestMethod -Uri $postUri -Method Post -Headers $this.GetHeaders() -ContentType 'application/json; charset=utf-8' -Body $body -ErrorAction Stop | Out-Null
+        Write-Verbose -Message ("Jira ticket '{0}' transitioned to '{1}'." -f $ticketKey, $targetStatus)
     }
 
     <#
@@ -112,6 +115,7 @@ class JiraClient {
     [void] EnsureTicketClosed([string] $jiraUrl) {
         $ticketKey = $this.GetTicketKeyFromUrl($jiraUrl)
         $status = $this.GetTicketStatus($ticketKey)
+        Write-Verbose -Message ("Ensuring Jira ticket '{0}' is closed. Current status is '{1}'." -f $ticketKey, $status)
 
         if ($status -eq 'Verify') {
             $this.SetTicketStatus($ticketKey, 'Close')
@@ -130,6 +134,7 @@ class JiraClient {
     System.String
     #>
     [string] CreatePrerequisiteTicket([PrefixWorkItem] $workItem, [string] $forestShortName, [bool] $dnsZoneDelegated) {
+        Write-Verbose -Message ("Creating Jira prerequisite ticket for prefix '{0}' (Forest='{1}', DelegationPresent={2})." -f $workItem.GetIdentifier(), $forestShortName, $dnsZoneDelegated)
         $delegationText = 'nicht vorhanden'
         if ($dnsZoneDelegated) {
             $delegationText = 'vorhanden'
@@ -165,6 +170,7 @@ Confluence Doku:
         }
 
         $this.SetTicketStatus($ticketKey, 'Commit')
+        Write-Verbose -Message ("Created Jira prerequisite ticket '{0}' for prefix '{1}'." -f $ticketKey, $workItem.GetIdentifier())
         return '{0}/browse/{1}' -f $this.BaseUrl, $ticketKey
     }
 }

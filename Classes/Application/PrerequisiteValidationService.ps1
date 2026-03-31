@@ -50,6 +50,7 @@ class PrerequisiteValidationService {
     #>
     # Runs the prerequisite pipeline as a pure validation step so callers can decide how to react to blocked work.
     [PrerequisiteEvaluation] Evaluate([PrefixWorkItem] $workItem, [EnvironmentContext] $environment) {
+        Write-Verbose -Message ("Evaluating prerequisites for prefix '{0}' in environment '{1}'." -f $workItem.GetIdentifier(), $environment.Name)
         # The evaluation object is the single carrier for all prerequisite outcomes so the caller does not need to interpret partial booleans.
         $evaluation = [PrerequisiteEvaluation]::new()
         $domainController = $this.ActiveDirectoryAdapter.GetDomainControllerName()
@@ -57,6 +58,7 @@ class PrerequisiteValidationService {
         $evaluation.ObservedAdSite = $this.ActiveDirectoryAdapter.GetSubnetSite($workItem.PrefixSubnet, $domainController)
 
         if ([string]::IsNullOrWhiteSpace($evaluation.ObservedAdSite)) {
+            Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': no AD site mapping found." -f $workItem.GetIdentifier())
             $evaluation.AddReason('Network is not assigned to any AD site.')
             $evaluation.RequiresNewJiraTicket = [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)
             $evaluation.RequiresExistingJiraWait = -not $evaluation.RequiresNewJiraTicket
@@ -66,6 +68,7 @@ class PrerequisiteValidationService {
         $evaluation.HasAdSite = $true
 
         if ($evaluation.ObservedAdSite.ToUpperInvariant() -ne $workItem.ValuemationSiteMandant.ToUpperInvariant()) {
+            Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': AD site '{1}' does not match expected mandant '{2}'." -f $workItem.GetIdentifier(), $evaluation.ObservedAdSite, $workItem.ValuemationSiteMandant)
             $evaluation.AddReason("Network is assigned to AD site '$($evaluation.ObservedAdSite)', but expected '$($workItem.ValuemationSiteMandant)'.")
             return $evaluation
         }
@@ -74,6 +77,7 @@ class PrerequisiteValidationService {
         $evaluation.ReverseZoneName = $this.DnsServerAdapter.FindBestReverseZoneName($workItem.PrefixSubnet, $domainController)
 
         if ([string]::IsNullOrWhiteSpace($evaluation.ReverseZoneName)) {
+            Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': reverse zone not found." -f $workItem.GetIdentifier())
             $evaluation.AddReason('Expected a reverse DNS zone, but none was found.')
             $evaluation.RequiresNewJiraTicket = [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)
             $evaluation.RequiresExistingJiraWait = -not $evaluation.RequiresNewJiraTicket
@@ -86,6 +90,7 @@ class PrerequisiteValidationService {
         $evaluation.HasDnsDelegation = $this.DnsServerAdapter.TestReverseZoneDelegation($workItem.PrefixSubnet, $delegationValidationDomain)
 
         if (-not $evaluation.HasDnsDelegation) {
+            Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': reverse DNS delegation missing." -f $workItem.GetIdentifier())
             $evaluation.AddReason('Expected a DNS delegation, but none was found.')
             $evaluation.RequiresNewJiraTicket = [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)
             $evaluation.RequiresExistingJiraWait = -not $evaluation.RequiresNewJiraTicket
@@ -93,10 +98,12 @@ class PrerequisiteValidationService {
         }
 
         if (-not [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)) {
+            Write-Verbose -Message ("Verifying closure state of existing Jira ticket '{0}' for prefix '{1}'." -f $workItem.ExistingTicketUrl, $workItem.GetIdentifier())
             $this.JiraClient.EnsureTicketClosed($workItem.ExistingTicketUrl)
         }
 
         $evaluation.CanContinue = $true
+        Write-Verbose -Message ("Prerequisites satisfied for prefix '{0}'." -f $workItem.GetIdentifier())
         return $evaluation
     }
 }

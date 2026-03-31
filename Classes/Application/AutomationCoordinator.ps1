@@ -77,12 +77,16 @@ class AutomationCoordinator {
     ) {
         $summaries = @()
         $runConfigurationMessage = "Coordinator run configuration: Environment='$($environment.Name)', SendFailureMail=$sendFailureMail, SkipPrefixOnboarding=$skipPrefixOnboarding, SkipIpDnsOnboarding=$skipIpDnsOnboarding, SkipIpDnsDecommissioning=$skipIpDnsDecommissioning."
+        Write-Verbose -Message $runConfigurationMessage
 
         if (-not $skipPrefixOnboarding) {
             $prefixSummary = $this.PrefixOnboardingService.ProcessBatch($environment)
             $prefixSummary.AddAudit('Debug', $runConfigurationMessage)
             $prefixSummary.AddAudit('Debug', "Coordinator executed PrefixOnboarding with SuccessCount=$($prefixSummary.SuccessCount), FailureCount=$($prefixSummary.FailureCount).")
             $summaries += $prefixSummary
+        }
+        else {
+            Write-Verbose -Message 'Skipping PrefixOnboarding service execution.'
         }
 
         if (-not $skipIpDnsOnboarding) {
@@ -91,6 +95,9 @@ class AutomationCoordinator {
             $ipOnboardingSummary.AddAudit('Debug', "Coordinator executed IpDnsOnboarding with SuccessCount=$($ipOnboardingSummary.SuccessCount), FailureCount=$($ipOnboardingSummary.FailureCount).")
             $summaries += $ipOnboardingSummary
         }
+        else {
+            Write-Verbose -Message 'Skipping IpDnsOnboarding service execution.'
+        }
 
         if (-not $skipIpDnsDecommissioning) {
             $ipDecommissioningSummary = $this.IpDnsDecommissioningService.ProcessBatch($environment)
@@ -98,9 +105,20 @@ class AutomationCoordinator {
             $ipDecommissioningSummary.AddAudit('Debug', "Coordinator executed IpDnsDecommissioning with SuccessCount=$($ipDecommissioningSummary.SuccessCount), FailureCount=$($ipDecommissioningSummary.FailureCount).")
             $summaries += $ipDecommissioningSummary
         }
+        else {
+            Write-Verbose -Message 'Skipping IpDnsDecommissioning service execution.'
+        }
 
         if ($sendFailureMail) {
             try {
+                $issueCount = @(
+                    foreach ($summary in @($summaries)) {
+                        foreach ($issue in @($summary.Issues)) {
+                            $issue
+                        }
+                    }
+                ).Count
+                Write-Verbose -Message ("Sending failure summary mail evaluation with {0} issue(s)." -f $issueCount)
                 $this.BatchNotificationService.SendFailureSummary($emailRecipients, $summaries)
             }
             catch {
@@ -117,6 +135,9 @@ class AutomationCoordinator {
                 $notificationSummary.Complete()
                 $summaries += $notificationSummary
             }
+        }
+        else {
+            Write-Verbose -Message 'Failure summary mail dispatch is disabled for this run.'
         }
 
         return $summaries

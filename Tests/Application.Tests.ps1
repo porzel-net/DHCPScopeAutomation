@@ -521,6 +521,8 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:journal.PrefixInfoEntries[0] | Should -Match 'Selected domain controller: dc01.example.test'
             $script:journal.PrefixInfoEntries[0] | Should -Match 'Selected DHCP server: m-dhcp02.de.mtu.corp'
             $script:journal.PrefixInfoEntries[0] | Should -Match 'Resolved reverse zone: 30.20.10.in-addr.arpa'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Calculated DHCP exclusion ranges: 3'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Calculated DHCP exclusion range: 10.20.30.0 - 10.20.30.0'
         }
 
         It 'captures prefix failures and degrades journal write errors into warnings' {
@@ -572,6 +574,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:journal.IpInfoEntries[0] | Should -Match 'Resolved reverse zone: 30.20.10.in-addr.arpa'
             $script:journal.IpInfoEntries[0] | Should -Match 'Source status: onboarding_open_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Target status: onboarding_done_dns'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Planned DNS action: ensure A/PTR'
         }
 
         It 'captures onboarding failures for IP work items with missing DNS names' {
@@ -610,6 +613,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:netBox.UpdatedIpStatuses | Should -Contain '22|decommissioning_done_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Source status: decommissioning_open_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Target status: decommissioning_done_dns'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Planned DNS action: remove A/PTR'
         }
 
         It 'downgrades IP journal write failures into warnings while keeping the original issue' {

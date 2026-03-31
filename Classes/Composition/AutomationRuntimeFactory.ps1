@@ -49,14 +49,17 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
     #>
     # Composition root for the module. Dependency construction stays here so application services remain injectable and testable.
     [AutomationRuntime] CreateRuntime() {
+        Write-Verbose -Message ("Creating automation runtime (ConfigurationPath='{0}', CredentialDirectory='{1}')." -f $this.ConfigurationPath, $this.CredentialDirectory)
         $configurationProvider = [EnvFileConfigurationProvider]::new($this.ConfigurationPath)
         $resolvedEnvironment = $this.ResolveEnvironment($configurationProvider)
         $resolvedRecipients = $this.ResolveEmailRecipients($configurationProvider)
+        Write-Verbose -Message ("Resolved runtime environment '{0}' with {1} email recipient(s)." -f $resolvedEnvironment, @($resolvedRecipients).Count)
         $environmentContext = [EnvironmentContext]::new($resolvedEnvironment)
         $credentialProvider = [SecureFileCredentialProvider]::new($this.CredentialDirectory)
 
         $netBoxCredential = $credentialProvider.GetApiCredential('DHCPScopeAutomationNetboxApiKey')
         $jiraCredential = $credentialProvider.GetApiCredential('DHCPScopeAutomationJiraApiKey')
+        Write-Verbose -Message 'Resolved NetBox and Jira credentials from secure storage.'
 
         # All side-effecting adapters are created here so the application layer stays constructor-injected and test-friendly.
         $activeDirectoryAdapter = [ActiveDirectoryAdapter]::new()
@@ -96,6 +99,7 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
             $notificationService
         )
 
+        Write-Verbose -Message 'Automation runtime composition completed.'
         return [AutomationRuntime]::new($environmentContext, $resolvedRecipients, $coordinator, $logService)
     }
 
@@ -112,9 +116,11 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
     #>
     hidden [string] ResolveEnvironment([EnvFileConfigurationProvider] $configurationProvider) {
         if (-not [string]::IsNullOrWhiteSpace($this.RequestedEnvironment)) {
+            Write-Verbose -Message ("Using explicitly requested environment '{0}'." -f $this.RequestedEnvironment)
             return $this.RequestedEnvironment
         }
 
+        Write-Verbose -Message 'Resolving environment from configuration provider.'
         return $configurationProvider.GetValue('Environment', 'Expected one of: dev, test, prod, gov, china.')
     }
 
@@ -131,9 +137,11 @@ class AutomationRuntimeFactory : AutomationRuntimeFactoryBase {
     #>
     hidden [string[]] ResolveEmailRecipients([EnvFileConfigurationProvider] $configurationProvider) {
         if ($this.RequestedEmailRecipients -and $this.RequestedEmailRecipients.Count -gt 0) {
+            Write-Verbose -Message ("Using explicitly requested email recipients (count={0})." -f @($this.RequestedEmailRecipients).Count)
             return @($this.RequestedEmailRecipients)
         }
 
+        Write-Verbose -Message 'Resolving email recipients from configuration provider.'
         return $configurationProvider.GetStringArray('EmailRecipients', 'Expected a comma separated recipient list.')
     }
 }

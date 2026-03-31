@@ -24,6 +24,7 @@ function Import-AutomationDependencies {
 
     foreach ($moduleName in $requiredModules) {
         try {
+            Write-Verbose -Message ("Importing dependency module '{0}'." -f $moduleName)
             Import-Module -Name $moduleName -ErrorAction Stop
         }
         catch {

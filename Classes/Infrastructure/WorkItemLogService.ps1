@@ -30,6 +30,10 @@ class WorkItemLogService {
 
         if (-not (Test-Path -Path $this.BasePath)) {
             New-Item -Path $this.BasePath -ItemType Directory -Force | Out-Null
+            Write-Verbose -Message ("Created log base path '{0}'." -f $this.BasePath)
+        }
+        else {
+            Write-Verbose -Message ("Using existing log base path '{0}'." -f $this.BasePath)
         }
     }
 
@@ -58,7 +62,9 @@ class WorkItemLogService {
     [string] CreateLogPath([string] $category, [string] $identifier) {
         $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
         $fileName = '{0}_{1}_{2}.log' -f $category, $this.SanitizeIdentifier($identifier), $timestamp
-        return (Join-Path -Path $this.BasePath -ChildPath $fileName)
+        $path = Join-Path -Path $this.BasePath -ChildPath $fileName
+        Write-Debug -Message ("Created log path '{0}' for category '{1}' and identifier '{2}'." -f $path, $category, $identifier)
+        return $path
     }
 
     <#
@@ -69,6 +75,7 @@ class WorkItemLogService {
     #>
     [void] WriteLog([string] $relativePath, [string[]] $lines) {
         $content = @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+        Write-Debug -Message ("Writing log file '{0}' with {1} non-empty line(s)." -f $relativePath, @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count)
         Set-Content -Path $relativePath -Value $content -Encoding UTF8
     }
 }

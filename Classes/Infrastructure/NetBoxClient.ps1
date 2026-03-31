@@ -173,6 +173,7 @@ class NetBoxClient {
     }
 
     hidden [PrefixWorkItem] ConvertPrefixToWorkItem([pscustomobject] $prefix) {
+        Write-Debug -Message ("Converting NetBox prefix '{0}' ({1}) into work item." -f $prefix.id, $prefix.prefix)
         $gateway = $this.ResolveDefaultGatewayConfiguration($prefix)
         $site = $this.GetSiteById([int] $prefix.scope.id)
 
@@ -196,6 +197,7 @@ class NetBoxClient {
     hidden [pscustomobject] ResolveDefaultGatewayConfiguration([pscustomobject] $prefix) {
         # NetBox stores gateway data behind a linked object, so keep that lookup isolated from the loop-level mapping.
         if ($null -eq $prefix.custom_fields.default_gateway -or $null -eq $prefix.custom_fields.default_gateway.id) {
+            Write-Debug -Message ("Prefix '{0}' has no default gateway configured." -f $prefix.id)
             return [pscustomobject]@{
                 Id      = 0
                 Address = $null
@@ -204,6 +206,7 @@ class NetBoxClient {
         }
 
         $defaultGatewayId = [int] $prefix.custom_fields.default_gateway.id
+        Write-Debug -Message ("Loading default gateway '{0}' for prefix '{1}'." -f $defaultGatewayId, $prefix.id)
         $defaultGateway = $this.GetIpAddressById($defaultGatewayId)
 
         return [pscustomobject]@{
@@ -221,14 +224,18 @@ class NetBoxClient {
     #>
     hidden [pscustomobject] GetMostSpecificPrefixForAddress([string] $address) {
         $filter = @{ contains = $address; limit = 0 }
+        Write-Debug -Message ("Resolving most specific prefix for IP '{0}'." -f $address)
         $prefixes = $this.GetPaged('/api/ipam/prefixes/', $filter)
         if (-not $prefixes) {
+            Write-Debug -Message ("No prefix found for IP '{0}'." -f $address)
             return $null
         }
 
-        return $prefixes |
+        $prefix = $prefixes |
             Sort-Object -Property @{ Expression = { [int] (($_.prefix -split '/')[1]) } } -Descending |
             Select-Object -First 1
+        Write-Debug -Message ("Most specific prefix for IP '{0}' is '{1}'." -f $address, $prefix.prefix)
+        return $prefix
     }
 
     <#

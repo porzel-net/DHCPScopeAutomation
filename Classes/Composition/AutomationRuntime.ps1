@@ -69,7 +69,8 @@ class AutomationRuntime {
         [bool] $skipIpDnsOnboarding,
         [bool] $skipIpDnsDecommissioning
     ) {
-        return $this.Coordinator.Run(
+        Write-Verbose -Message ("Executing automation runtime for environment '{0}' (SendFailureMail={1}, SkipPrefixOnboarding={2}, SkipIpDnsOnboarding={3}, SkipIpDnsDecommissioning={4})." -f $this.Environment.Name, $sendFailureMail, $skipPrefixOnboarding, $skipIpDnsOnboarding, $skipIpDnsDecommissioning)
+        $summaries = $this.Coordinator.Run(
             $this.Environment,
             $this.EmailRecipients,
             $sendFailureMail,
@@ -77,5 +78,8 @@ class AutomationRuntime {
             $skipIpDnsOnboarding,
             $skipIpDnsDecommissioning
         )
+
+        Write-Verbose -Message ("Automation runtime completed with {0} summary/summaries." -f @($summaries).Count)
+        return $summaries
     }
 }

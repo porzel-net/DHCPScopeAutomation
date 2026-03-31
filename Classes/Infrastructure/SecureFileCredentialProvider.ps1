@@ -28,6 +28,10 @@ class SecureFileCredentialProvider {
 
         if (-not (Test-Path -Path $this.BasePath)) {
             New-Item -Path $this.BasePath -ItemType Directory | Out-Null
+            Write-Verbose -Message ("Created credential directory '{0}'." -f $this.BasePath)
+        }
+        else {
+            Write-Verbose -Message ("Using credential directory '{0}'." -f $this.BasePath)
         }
     }
 
@@ -46,6 +50,7 @@ class SecureFileCredentialProvider {
         $loaded = $null
 
         if (Test-Path -Path $path) {
+            Write-Verbose -Message ("Loading credential '{0}' from '{1}'." -f $credentialName, $path)
             try {
                 $loaded = Import-Clixml -Path $path
             }
@@ -58,6 +63,7 @@ class SecureFileCredentialProvider {
 
         if ($null -ne $loaded) {
             if ($loaded.Appliance -and $loaded.ApiKey) {
+                Write-Verbose -Message ("Loaded credential '{0}' from secure file." -f $credentialName)
                 return [AutomationCredential]::new($credentialName, $loaded.Appliance, $loaded.ApiKey)
             }
 
@@ -66,6 +72,7 @@ class SecureFileCredentialProvider {
             )
         }
 
+        Write-Warning -Message ("Credential '{0}' not found on disk. Interactive bootstrap is required." -f $credentialName)
         $appliance = Read-Host ('Enter appliance/base URL for {0}' -f $credentialName)
         $apiKey = Read-Host ('Enter API key for {0}' -f $credentialName) -AsSecureString
 
@@ -75,6 +82,7 @@ class SecureFileCredentialProvider {
         }
 
         $record | Export-Clixml -Path $path
+        Write-Verbose -Message ("Stored credential '{0}' at '{1}'." -f $credentialName, $path)
 
         return [AutomationCredential]::new($credentialName, $appliance, $apiKey)
     }

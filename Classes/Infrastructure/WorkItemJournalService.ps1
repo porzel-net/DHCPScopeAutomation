@@ -45,6 +45,7 @@ class WorkItemJournalService {
     System.Void
     #>
     [void] WriteEntry([string] $targetType, [int] $targetId, [string[]] $lines, [string] $kind) {
+        Write-Debug -Message ("Writing journal entry for targetType='{0}', targetId={1}, kind='{2}', lineCount={3}." -f $targetType, $targetId, $kind, @($lines).Count)
         $this.NetBoxClient.AddJournalEntry($targetType, $targetId, $this.JoinLines($lines), $kind)
     }
 

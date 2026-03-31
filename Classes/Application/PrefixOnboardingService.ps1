@@ -128,10 +128,40 @@ class PrefixOnboardingService {
     # Template-style work-item flow: validate, branch by policy, execute provisioning, translate all failures into one reporting model.
     hidden [void] ProcessWorkItem([EnvironmentContext] $environment, [PrefixWorkItem] $workItem, [BatchRunSummary] $summary) {
         $lines = @(('Processing prefix {0}' -f $workItem.GetIdentifier()))
+        $lines += ('Environment: {0}' -f $environment.Name)
+        $lines += ('DHCPType: {0}' -f $workItem.DHCPType)
+        $lines += ('Domain: {0}' -f $workItem.Domain)
+        $lines += ('ValuemationSiteMandant: {0}' -f $workItem.ValuemationSiteMandant)
+        $lines += ('PrefixRole: {0}' -f $workItem.PrefixRole)
         $summary.AddAudit('Debug', "Starting prefix work item '$($workItem.GetIdentifier())'.")
 
         try {
             $evaluation = $this.PrerequisiteValidationService.Evaluate($workItem, $environment)
+            if (-not [string]::IsNullOrWhiteSpace($evaluation.ObservedDomainController)) {
+                $lines += ('Selected domain controller: {0}' -f $evaluation.ObservedDomainController)
+                $summary.AddAudit('Debug', "Selected domain controller '$($evaluation.ObservedDomainController)' for prefix '$($workItem.GetIdentifier())'.")
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($evaluation.ObservedAdSite)) {
+                $lines += ('Observed AD site: {0}' -f $evaluation.ObservedAdSite)
+            }
+            else {
+                $lines += 'Observed AD site: <none>'
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($evaluation.ReverseZoneName)) {
+                $lines += ('Resolved reverse zone: {0}' -f $evaluation.ReverseZoneName)
+            }
+            else {
+                $lines += 'Resolved reverse zone: <none>'
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($evaluation.DelegationValidationDomain)) {
+                $lines += ('Delegation validation domain: {0}' -f $evaluation.DelegationValidationDomain)
+            }
+
+            $lines += ('Prerequisite flags: HasAdSite={0}, HasMatchingMandant={1}, HasReverseZone={2}, HasDnsDelegation={3}, CanContinue={4}' -f $evaluation.HasAdSite, $evaluation.HasMatchingMandant, $evaluation.HasReverseZone, $evaluation.HasDnsDelegation, $evaluation.CanContinue)
+            $summary.AddAudit('Debug', "Prerequisite evaluation for prefix '$($workItem.GetIdentifier())': CanContinue=$($evaluation.CanContinue), HasAdSite=$($evaluation.HasAdSite), HasMatchingMandant=$($evaluation.HasMatchingMandant), HasReverseZone=$($evaluation.HasReverseZone), HasDnsDelegation=$($evaluation.HasDnsDelegation).")
             $lines += $evaluation.Reasons
 
             if (-not $evaluation.CanContinue) {
@@ -169,6 +199,8 @@ class PrefixOnboardingService {
     ) {
         if ($evaluation.RequiresNewJiraTicket) {
             $forestShortName = $this.ActiveDirectoryAdapter.GetForestShortName($workItem.Domain)
+            $lines += 'Prerequisites blocked; creating Jira prerequisite ticket.'
+            $lines += ('Resolved forest short name: {0}' -f $forestShortName)
             $ticketUrl = $this.JiraClient.CreatePrerequisiteTicket($workItem, $forestShortName, $evaluation.HasDnsDelegation)
             $this.NetBoxClient.UpdatePrefixTicketUrl($workItem.Id, $ticketUrl)
             $lines += 'Created Jira ticket {0}' -f $ticketUrl
@@ -180,6 +212,7 @@ class PrefixOnboardingService {
         }
 
         $message = ($evaluation.Reasons -join ' ')
+        $lines += 'Prerequisites blocked; existing Jira ticket detected, onboarding remains blocked.'
         if ([string]::IsNullOrWhiteSpace($message)) {
             $message = 'Prefix prerequisites are not satisfied.'
         }
@@ -197,6 +230,9 @@ class PrefixOnboardingService {
     #>
     hidden [void] CompleteNoDhcpPrefix([PrefixWorkItem] $workItem, [string[]] $lines, [BatchRunSummary] $summary) {
         if ($workItem.ShouldEnsureGatewayDns()) {
+            $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet)
+            $lines += ('Gateway DNS context: DC={0}, ReverseZone={1}' -f $dnsContext.DomainController, $dnsContext.ReverseZone)
+            $summary.AddAudit('Debug', "Gateway DNS context for prefix '$($workItem.GetIdentifier())': DC='$($dnsContext.DomainController)', ReverseZone='$($dnsContext.ReverseZone)'.")
             $this.GatewayDnsService.EnsurePrefixGatewayDns($workItem)
             $lines += 'Gateway DNS updated.'
         }
@@ -229,6 +265,11 @@ class PrefixOnboardingService {
         [BatchRunSummary] $summary
     ) {
         $scopeDefinition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
+        $lines += ('Calculated DHCP scope name: {0}' -f $scopeDefinition.Name)
+        $lines += ('Calculated DHCP subnet mask: {0}' -f $scopeDefinition.SubnetMask)
+        $lines += ('Calculated DHCP range: {0} - {1}' -f $scopeDefinition.Range.StartAddress.Value, $scopeDefinition.Range.EndAddress.Value)
+        $lines += ('Calculated DHCP gateway: {0}' -f $scopeDefinition.Range.GatewayAddress.Value)
+        $lines += ('Calculated DHCP broadcast: {0}' -f $scopeDefinition.Range.BroadcastAddress.Value)
 
         if ($scopeDefinition.Range.GatewayAddress.Value -ne $workItem.DefaultGatewayAddress.Value) {
             throw [System.InvalidOperationException]::new(
@@ -237,12 +278,17 @@ class PrefixOnboardingService {
         }
 
         # Server selection is environment-aware and intentionally delegated so onboarding does not encode routing policy itself.
+        $lines += ('Selecting DHCP server for environment ''{0}'' and AD site ''{1}''.' -f $environment.Name, $evaluation.ObservedAdSite)
         $selectedServer = $this.DhcpServerSelectionService.SelectServer($environment, $evaluation.ObservedAdSite)
         $lines += 'Selected DHCP server: {0}' -f $selectedServer
+        $summary.AddAudit('Debug', "Selected DHCP server '$selectedServer' for prefix '$($workItem.GetIdentifier())' (Environment='$($environment.Name)', AdSite='$($evaluation.ObservedAdSite)').")
 
         $this.DhcpServerAdapter.EnsureScope($selectedServer, $scopeDefinition)
         $lines += 'DHCP scope ensured.'
 
+        $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet)
+        $lines += ('Gateway DNS context: DC={0}, ReverseZone={1}' -f $dnsContext.DomainController, $dnsContext.ReverseZone)
+        $summary.AddAudit('Debug', "Gateway DNS context for prefix '$($workItem.GetIdentifier())': DC='$($dnsContext.DomainController)', ReverseZone='$($dnsContext.ReverseZone)'.")
         $this.GatewayDnsService.EnsurePrefixGatewayDns($workItem)
         $lines += 'Gateway DNS updated.'
 

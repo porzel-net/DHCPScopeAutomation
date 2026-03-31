@@ -31,6 +31,7 @@ class DhcpServerAdapter {
     hidden [string] GetSitePattern([string] $site, [bool] $isDevelopment) {
         $normalizedSite = $site.Trim().ToLowerInvariant()
         $pattern = $null
+        Write-Debug -Message ("Resolving DHCP site pattern for site '{0}' (normalized '{1}'), development={2}." -f $site, $normalizedSite, $isDevelopment)
         switch ($normalizedSite) {
             'eme' { $pattern = 'e*' }
             'rze' { $pattern = 'r*' }
@@ -44,9 +45,12 @@ class DhcpServerAdapter {
         }
 
         if ($isDevelopment) {
-            return 'dev{0}' -f $pattern
+            $developmentPattern = 'dev{0}' -f $pattern
+            Write-Verbose -Message ("Using development DHCP site pattern '{0}' for site '{1}'." -f $developmentPattern, $normalizedSite)
+            return $developmentPattern
         }
 
+        Write-Verbose -Message ("Using DHCP site pattern '{0}' for site '{1}'." -f $pattern, $normalizedSite)
         return $pattern
     }
 
@@ -57,6 +61,7 @@ class DhcpServerAdapter {
     System.Boolean
     #>
     hidden [bool] IsPrimaryServer([string] $dhcpServer) {
+        Write-Debug -Message ("Checking DHCP primary marker on server '{0}'." -f $dhcpServer)
         $result = Invoke-Command -ComputerName $dhcpServer -ScriptBlock {
             try {
                 $value = Get-ItemProperty -Path 'HKLM:\SOFTWARE\ACW\DHCP' -Name 'Primary' -ErrorAction Stop
@@ -67,6 +72,7 @@ class DhcpServerAdapter {
             }
         }
 
+        Write-Debug -Message ("DHCP server '{0}' primary marker result: {1}" -f $dhcpServer, [bool] $result)
         return [bool] $result
     }
 
@@ -77,7 +83,9 @@ class DhcpServerAdapter {
     System.String
     #>
     hidden [string] GetCurrentDomainSuffix() {
-        return [string] (Get-ADDomainController).Domain
+        $domainSuffix = [string] (Get-ADDomainController).Domain
+        Write-Verbose -Message ("Resolved DHCP domain suffix '{0}' for server filtering." -f $domainSuffix)
+        return $domainSuffix
     }
 
     <#
@@ -87,6 +95,7 @@ class DhcpServerAdapter {
     System.String
     #>
     [string] GetPrimaryServerForSite([string] $site, [bool] $isDevelopment) {
+        Write-Verbose -Message ("Selecting primary DHCP server for site '{0}', development={1}." -f $site, $isDevelopment)
         $pattern = $this.GetSitePattern($site, $isDevelopment)
         $domainSuffix = $this.GetCurrentDomainSuffix()
         $servers = @(
@@ -97,6 +106,7 @@ class DhcpServerAdapter {
                 } |
                 Select-Object -ExpandProperty DnsName
         )
+        Write-Debug -Message ("Filtered DHCP server candidates for site '{0}' and suffix '{1}': {2}" -f $site, $domainSuffix, ($servers -join ', '))
 
         if (-not $servers) {
             throw [System.InvalidOperationException]::new("No DHCP servers found for site '$site'.")
@@ -104,10 +114,12 @@ class DhcpServerAdapter {
 
         foreach ($server in $servers) {
             if ($this.IsPrimaryServer($server)) {
+                Write-Verbose -Message ("Selected primary DHCP server '{0}' for site '{1}'." -f $server, $site)
                 return $server
             }
         }
 
+        Write-Verbose -Message ("No primary DHCP server flag found for site '{0}'. Falling back to '{1}'." -f $site, [string] $servers[0])
         return [string] $servers[0]
     }
 
@@ -119,9 +131,12 @@ class DhcpServerAdapter {
     #>
     [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition) {
         $scopeId = $definition.Subnet.NetworkAddress.Value
+        Write-Verbose -Message ("Ensuring DHCP scope '{0}' on server '{1}'." -f $scopeId, $dhcpServer)
+        Write-Debug -Message ("Scope details: Name='{0}', Range='{1}-{2}', Mask='{3}', LeaseDays={4}, DynamicDns={5}, Exclusions={6}" -f $definition.Name, $definition.Range.StartAddress.Value, $definition.Range.EndAddress.Value, $definition.SubnetMask, $definition.LeaseDurationDays, $definition.ConfigureDynamicDns, @($definition.ExclusionRanges).Count)
         $existingScope = Get-DhcpServerv4Scope -ComputerName $dhcpServer -ScopeId $scopeId -ErrorAction SilentlyContinue
 
         if (-not $existingScope) {
+            Write-Verbose -Message ("Creating new DHCP scope '{0}' on '{1}'." -f $scopeId, $dhcpServer)
             Add-DhcpServerv4Scope `
                 -ComputerName $dhcpServer `
                 -Name $definition.Name `
@@ -132,8 +147,12 @@ class DhcpServerAdapter {
                 -LeaseDuration (New-TimeSpan -Days $definition.LeaseDurationDays) `
                 -ErrorAction Stop
         }
+        else {
+            Write-Verbose -Message ("DHCP scope '{0}' already exists on '{1}', reusing existing scope." -f $scopeId, $dhcpServer)
+        }
 
         if ($definition.ConfigureDynamicDns) {
+            Write-Verbose -Message ("Configuring dynamic DNS settings for scope '{0}' on '{1}'." -f $scopeId, $dhcpServer)
             Set-DhcpServerv4DnsSetting `
                 -ComputerName $dhcpServer `
                 -ScopeId $scopeId `
@@ -144,12 +163,14 @@ class DhcpServerAdapter {
                 -ErrorAction Stop
         }
 
+        Write-Verbose -Message ("Applying DHCP option values for scope '{0}' on '{1}'." -f $scopeId, $dhcpServer)
         Set-DhcpServerv4OptionValue -ComputerName $dhcpServer -ScopeId $scopeId -DnsDomain $definition.DnsDomain -Router $definition.Range.GatewayAddress.Value -ErrorAction Stop
         Set-DhcpServerv4OptionValue -ComputerName $dhcpServer -ScopeId $scopeId -OptionId 28 -Value $definition.Range.BroadcastAddress.Value -ErrorAction Stop
 
         # Exclusions can be either strict or best-effort depending on the DHCP model.
         foreach ($range in @($definition.ExclusionRanges)) {
             if ($range.MustSucceed) {
+                Write-Debug -Message ("Adding mandatory DHCP exclusion range '{0}-{1}' to scope '{2}' on '{3}'." -f $range.StartAddress.Value, $range.EndAddress.Value, $scopeId, $dhcpServer)
                 Add-DhcpServerv4ExclusionRange `
                     -ComputerName $dhcpServer `
                     -ScopeId $scopeId `
@@ -159,6 +180,7 @@ class DhcpServerAdapter {
                 continue
             }
 
+            Write-Debug -Message ("Adding best-effort DHCP exclusion range '{0}-{1}' to scope '{2}' on '{3}'." -f $range.StartAddress.Value, $range.EndAddress.Value, $scopeId, $dhcpServer)
             Add-DhcpServerv4ExclusionRange `
                 -ComputerName $dhcpServer `
                 -ScopeId $scopeId `
@@ -175,18 +197,22 @@ class DhcpServerAdapter {
     System.Void
     #>
     [void] EnsureScopeFailover([string] $dhcpServer, [IPv4Subnet] $subnet) {
+        Write-Verbose -Message ("Ensuring DHCP failover linkage for scope '{0}' on server '{1}'." -f $subnet.NetworkAddress.Value, $dhcpServer)
         try {
             $failover = Get-DhcpServerv4Failover -ComputerName $dhcpServer -ErrorAction Stop | Select-Object -First 1
         }
         catch {
             # Missing failover is not fatal for provisioning; the scope itself is still valid.
+            Write-Verbose -Message ("No DHCP failover configuration available on '{0}'. Scope '{1}' remains without failover link." -f $dhcpServer, $subnet.NetworkAddress.Value)
             return
         }
 
         if ($null -eq $failover -or [string]::IsNullOrWhiteSpace($failover.Name)) {
+            Write-Verbose -Message ("Failover query returned no usable failover name on '{0}'." -f $dhcpServer)
             return
         }
 
+        Write-Verbose -Message ("Linking scope '{0}' to failover '{1}' on '{2}'." -f $subnet.NetworkAddress.Value, $failover.Name, $dhcpServer)
         Add-DhcpServerv4FailoverScope -ComputerName $dhcpServer -Name $failover.Name -ScopeId $subnet.NetworkAddress.Value -ErrorAction SilentlyContinue | Out-Null
     }
 

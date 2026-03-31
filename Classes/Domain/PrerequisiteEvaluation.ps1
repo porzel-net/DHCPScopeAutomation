@@ -24,8 +24,10 @@ class PrerequisiteEvaluation {
     [bool] $HasMatchingMandant
     [bool] $HasReverseZone
     [bool] $HasDnsDelegation
+    [string] $ObservedDomainController
     [string] $ObservedAdSite
     [string] $ReverseZoneName
+    [string] $DelegationValidationDomain
     [string[]] $Reasons
 
     PrerequisiteEvaluation() {

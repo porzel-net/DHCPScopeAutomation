@@ -76,17 +76,27 @@ class AutomationCoordinator {
         [bool] $skipIpDnsDecommissioning
     ) {
         $summaries = @()
+        $runConfigurationMessage = "Coordinator run configuration: Environment='$($environment.Name)', SendFailureMail=$sendFailureMail, SkipPrefixOnboarding=$skipPrefixOnboarding, SkipIpDnsOnboarding=$skipIpDnsOnboarding, SkipIpDnsDecommissioning=$skipIpDnsDecommissioning."
 
         if (-not $skipPrefixOnboarding) {
-            $summaries += $this.PrefixOnboardingService.ProcessBatch($environment)
+            $prefixSummary = $this.PrefixOnboardingService.ProcessBatch($environment)
+            $prefixSummary.AddAudit('Debug', $runConfigurationMessage)
+            $prefixSummary.AddAudit('Debug', "Coordinator executed PrefixOnboarding with SuccessCount=$($prefixSummary.SuccessCount), FailureCount=$($prefixSummary.FailureCount).")
+            $summaries += $prefixSummary
         }
 
         if (-not $skipIpDnsOnboarding) {
-            $summaries += $this.IpDnsOnboardingService.ProcessBatch($environment)
+            $ipOnboardingSummary = $this.IpDnsOnboardingService.ProcessBatch($environment)
+            $ipOnboardingSummary.AddAudit('Debug', $runConfigurationMessage)
+            $ipOnboardingSummary.AddAudit('Debug', "Coordinator executed IpDnsOnboarding with SuccessCount=$($ipOnboardingSummary.SuccessCount), FailureCount=$($ipOnboardingSummary.FailureCount).")
+            $summaries += $ipOnboardingSummary
         }
 
         if (-not $skipIpDnsDecommissioning) {
-            $summaries += $this.IpDnsDecommissioningService.ProcessBatch($environment)
+            $ipDecommissioningSummary = $this.IpDnsDecommissioningService.ProcessBatch($environment)
+            $ipDecommissioningSummary.AddAudit('Debug', $runConfigurationMessage)
+            $ipDecommissioningSummary.AddAudit('Debug', "Coordinator executed IpDnsDecommissioning with SuccessCount=$($ipDecommissioningSummary.SuccessCount), FailureCount=$($ipDecommissioningSummary.FailureCount).")
+            $summaries += $ipDecommissioningSummary
         }
 
         if ($sendFailureMail) {

@@ -518,6 +518,9 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:dhcp.EnsuredScopes | Should -Contain 'm-dhcp02.de.mtu.corp|10.20.30.0/24'
             $script:dhcp.FailoverScopes | Should -Contain 'm-dhcp02.de.mtu.corp|10.20.30.0/24'
             $script:netBox.MarkedPrefixes | Should -Contain 13
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Selected domain controller: dc01.example.test'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Selected DHCP server: m-dhcp02.de.mtu.corp'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Resolved reverse zone: 30.20.10.in-addr.arpa'
         }
 
         It 'captures prefix failures and degrades journal write errors into warnings' {
@@ -565,6 +568,10 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $summary.FailureCount | Should -Be 0
             $script:gatewayDns.IpEnsureCalls | Should -Contain '10.20.30.10'
             $script:netBox.UpdatedIpStatuses | Should -Contain '20|onboarding_done_dns'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Selected domain controller: dc01.example.test'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Resolved reverse zone: 30.20.10.in-addr.arpa'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Source status: onboarding_open_dns'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Target status: onboarding_done_dns'
         }
 
         It 'captures onboarding failures for IP work items with missing DNS names' {
@@ -601,6 +608,8 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $summary.FailureCount | Should -Be 0
             $script:gatewayDns.IpRemoveCalls | Should -Contain '10.20.30.12'
             $script:netBox.UpdatedIpStatuses | Should -Contain '22|decommissioning_done_dns'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Source status: decommissioning_open_dns'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Target status: decommissioning_done_dns'
         }
 
         It 'downgrades IP journal write failures into warnings while keeping the original issue' {

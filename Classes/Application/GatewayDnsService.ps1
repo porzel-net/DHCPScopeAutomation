@@ -29,6 +29,20 @@ class GatewayDnsService {
 
     <#
     .SYNOPSIS
+    Exposes the resolved DNS execution context for diagnostic logging.
+
+    .PARAMETER subnet
+    Subnet for which DNS context should be resolved.
+
+    .OUTPUTS
+    DnsExecutionContext
+    #>
+    [DnsExecutionContext] GetDnsExecutionContext([IPv4Subnet] $subnet) {
+        return $this.ResolveDnsExecutionContext($subnet)
+    }
+
+    <#
+    .SYNOPSIS
     Resolves the DNS execution context for one subnet.
 
     .DESCRIPTION
@@ -43,13 +57,17 @@ class GatewayDnsService {
     #>
     # Internal facade step that resolves all DNS execution dependencies once and hides AD/DNS lookup choreography from use cases.
     hidden [DnsExecutionContext] ResolveDnsExecutionContext([IPv4Subnet] $subnet) {
+        Write-Verbose -Message ("Resolving DNS execution context for subnet '{0}'." -f $subnet.Cidr)
         $domainController = $this.ActiveDirectoryAdapter.GetDomainControllerName()
+        Write-Verbose -Message ("Selected domain controller '{0}' for subnet '{1}'." -f $domainController, $subnet.Cidr)
         $reverseZone = $this.DnsServerAdapter.FindBestReverseZoneName($subnet, $domainController)
 
         if ([string]::IsNullOrWhiteSpace($reverseZone)) {
+            Write-Debug -Message ("No reverse zone could be resolved for subnet '{0}' via domain controller '{1}'." -f $subnet.Cidr, $domainController)
             throw [System.InvalidOperationException]::new("No reverse zone found for prefix '$($subnet.Cidr)'.")
         }
 
+        Write-Verbose -Message ("Resolved reverse zone '{0}' for subnet '{1}'." -f $reverseZone, $subnet.Cidr)
         return [DnsExecutionContext]::new($domainController, $reverseZone)
     }
 
@@ -67,6 +85,7 @@ class GatewayDnsService {
     # Facade method for prefix onboarding: the application layer asks for gateway DNS as one intent, not as individual DNS operations.
     [void] EnsurePrefixGatewayDns([PrefixWorkItem] $workItem) {
         $dnsContext = $this.ResolveDnsExecutionContext($workItem.PrefixSubnet)
+        Write-Debug -Message ("Ensuring gateway DNS for prefix '{0}' using DC '{1}', reverse zone '{2}', gateway '{3}', dnsName '{4}'." -f $workItem.GetIdentifier(), $dnsContext.DomainController, $dnsContext.ReverseZone, $workItem.DefaultGatewayAddress.Value, $workItem.DnsName)
 
         $this.DnsServerAdapter.EnsureDnsRecordsForIp(
             $dnsContext.DomainController,
@@ -96,6 +115,7 @@ class GatewayDnsService {
         }
 
         $dnsContext = $this.ResolveDnsExecutionContext($workItem.PrefixSubnet)
+        Write-Debug -Message ("Ensuring IP DNS for '{0}' using DC '{1}', reverse zone '{2}', dnsName '{3}'." -f $workItem.GetIdentifier(), $dnsContext.DomainController, $dnsContext.ReverseZone, $workItem.DnsName)
 
         $this.DnsServerAdapter.EnsureDnsRecordsForIp(
             $dnsContext.DomainController,
@@ -121,6 +141,7 @@ class GatewayDnsService {
     # Facade method for IP decommissioning; keeps deletion semantics centralized for later lifecycle growth.
     [void] RemoveIpDns([IpAddressWorkItem] $workItem) {
         $dnsContext = $this.ResolveDnsExecutionContext($workItem.PrefixSubnet)
+        Write-Debug -Message ("Removing IP DNS for '{0}' using DC '{1}' and reverse zone '{2}'." -f $workItem.GetIdentifier(), $dnsContext.DomainController, $dnsContext.ReverseZone)
 
         $this.DnsServerAdapter.RemoveDnsRecordsForIp(
             $dnsContext.DomainController,

@@ -109,14 +109,20 @@ class NetBoxClient {
 
         $results = @()
         $nextUri = $uri
+        $pageNumber = 0
+        Write-Verbose -Message ("NetBox GET paged request started for '{0}' with filter '{1}'." -f $relativePath, $queryString)
 
         while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
             # Keep following NetBox pagination until the API stops returning a next link.
+            $pageNumber++
+            Write-Debug -Message ("NetBox GET page {0}: {1}" -f $pageNumber, $nextUri)
             $response = Invoke-RestMethod -Uri $nextUri -Method Get -Headers $headers -ErrorAction Stop
             $results += @($response.results)
+            Write-Debug -Message ("NetBox GET page {0} returned {1} result(s)." -f $pageNumber, @($response.results).Count)
             $nextUri = $response.next
         }
 
+        Write-Verbose -Message ("NetBox GET paged request completed for '{0}'. Total results: {1}." -f $relativePath, @($results).Count)
         return $results
     }
 
@@ -153,6 +159,7 @@ class NetBoxClient {
             status    = 'onboarding_open_dns_dhcp'
             cf_domain = $environment.DnsZone
         }
+        Write-Verbose -Message ("Loading open prefix work items for environment '{0}' and DNS zone '{1}'." -f $environment.Name, $environment.DnsZone)
 
         $prefixes = $this.GetPaged('/api/ipam/prefixes/', $filter)
         $workItems = @()
@@ -161,6 +168,7 @@ class NetBoxClient {
             $workItems += $this.ConvertPrefixToWorkItem($prefix)
         }
 
+        Write-Verbose -Message ("Prepared {0} prefix work item(s) for environment '{1}'." -f @($workItems).Count, $environment.Name)
         return $workItems
     }
 
@@ -231,23 +239,33 @@ class NetBoxClient {
     #>
     [IpAddressWorkItem[]] GetIpWorkItems([EnvironmentContext] $environment, [string[]] $statuses) {
         $filter = @{ status = $statuses }
+        Write-Verbose -Message ("Loading IP work items for environment '{0}' with statuses '{1}'." -f $environment.Name, ($statuses -join ', '))
         $ipAddresses = $this.GetPaged('/api/ipam/ip-addresses/', $filter)
         $workItems = @()
+        $skippedWithoutPrefixCount = 0
+        $skippedWithoutDomainCount = 0
+        $skippedWrongDomainCount = 0
 
         foreach ($ipAddress in $ipAddresses) {
             $hostIp = ($ipAddress.address -split '/')[0]
             $prefix = $this.GetMostSpecificPrefixForAddress($hostIp)
             if ($null -eq $prefix) {
+                $skippedWithoutPrefixCount++
+                Write-Debug -Message ("Skipping IP '{0}' because no containing prefix was found." -f $hostIp)
                 continue
             }
 
             $domain = [string] $prefix.custom_fields.domain
             if ([string]::IsNullOrWhiteSpace($domain)) {
+                $skippedWithoutDomainCount++
+                Write-Debug -Message ("Skipping IP '{0}' because containing prefix '{1}' has no domain custom field." -f $hostIp, $prefix.prefix)
                 continue
             }
 
             # Only return work items that belong to the active environment's DNS zone.
             if ($domain.ToLowerInvariant() -ne $environment.DnsZone.ToLowerInvariant()) {
+                $skippedWrongDomainCount++
+                Write-Debug -Message ("Skipping IP '{0}' because prefix domain '{1}' does not match environment DNS zone '{2}'." -f $hostIp, $domain, $environment.DnsZone)
                 continue
             }
 
@@ -261,6 +279,7 @@ class NetBoxClient {
             )
         }
 
+        Write-Verbose -Message ("Prepared {0} IP work item(s) for environment '{1}'. Skipped: no-prefix={2}, no-domain={3}, domain-mismatch={4}." -f @($workItems).Count, $environment.Name, $skippedWithoutPrefixCount, $skippedWithoutDomainCount, $skippedWrongDomainCount)
         return $workItems
     }
 
@@ -272,6 +291,7 @@ class NetBoxClient {
     #>
     [void] UpdatePrefixTicketUrl([int] $prefixId, [string] $ticketUrl) {
         $uri = '{0}/api/ipam/prefixes/{1}/' -f $this.BaseUrl, $prefixId
+        Write-Verbose -Message ("Updating NetBox prefix '{0}' with Jira ticket URL '{1}'." -f $prefixId, $ticketUrl)
         $body = @{
             custom_fields = @{
                 ad_sites_and_services_ticket_url = $ticketUrl
@@ -289,6 +309,7 @@ class NetBoxClient {
     #>
     [void] MarkPrefixOnboardingDone([int] $prefixId) {
         $uri = '{0}/api/ipam/prefixes/{1}/' -f $this.BaseUrl, $prefixId
+        Write-Verbose -Message ("Marking NetBox prefix '{0}' as onboarding_done_dns_dhcp." -f $prefixId)
         $body = @{ status = 'onboarding_done_dns_dhcp' } | ConvertTo-Json -Depth 10
         Invoke-RestMethod -Uri $uri -Method Patch -Headers $this.GetJsonHeaders() -Body $body -ErrorAction Stop | Out-Null
     }
@@ -301,6 +322,7 @@ class NetBoxClient {
     #>
     [void] UpdateIpStatus([int] $ipId, [string] $status) {
         $uri = '{0}/api/ipam/ip-addresses/{1}/' -f $this.BaseUrl, $ipId
+        Write-Verbose -Message ("Updating NetBox IP '{0}' to status '{1}'." -f $ipId, $status)
         $body = @{ status = $status } | ConvertTo-Json -Depth 10
         Invoke-RestMethod -Uri $uri -Method Patch -Headers $this.GetJsonHeaders() -Body $body -ErrorAction Stop | Out-Null
     }
@@ -325,6 +347,7 @@ class NetBoxClient {
             kind                 = $kind
         } | ConvertTo-Json -Depth 10
 
+        Write-Debug -Message ("Writing NetBox journal entry: Type='{0}', Id={1}, Kind='{2}', MessageLength={3}." -f $targetType, $targetId, $kind, [string] $message.Length)
         Invoke-RestMethod -Uri $uri -Method Post -Headers $this.GetJsonHeaders() -Body $body -ErrorAction Stop | Out-Null
     }
 

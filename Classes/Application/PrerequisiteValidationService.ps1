@@ -53,6 +53,7 @@ class PrerequisiteValidationService {
         # The evaluation object is the single carrier for all prerequisite outcomes so the caller does not need to interpret partial booleans.
         $evaluation = [PrerequisiteEvaluation]::new()
         $domainController = $this.ActiveDirectoryAdapter.GetDomainControllerName()
+        $evaluation.ObservedDomainController = $domainController
         $evaluation.ObservedAdSite = $this.ActiveDirectoryAdapter.GetSubnetSite($workItem.PrefixSubnet, $domainController)
 
         if ([string]::IsNullOrWhiteSpace($evaluation.ObservedAdSite)) {
@@ -80,7 +81,9 @@ class PrerequisiteValidationService {
         }
 
         $evaluation.HasReverseZone = $true
-        $evaluation.HasDnsDelegation = $this.DnsServerAdapter.TestReverseZoneDelegation($workItem.PrefixSubnet, $environment.GetDelegationValidationDomain())
+        $delegationValidationDomain = $environment.GetDelegationValidationDomain()
+        $evaluation.DelegationValidationDomain = $delegationValidationDomain
+        $evaluation.HasDnsDelegation = $this.DnsServerAdapter.TestReverseZoneDelegation($workItem.PrefixSubnet, $delegationValidationDomain)
 
         if (-not $evaluation.HasDnsDelegation) {
             $evaluation.AddReason('Expected a DNS delegation, but none was found.')

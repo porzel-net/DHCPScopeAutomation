@@ -41,13 +41,16 @@ class DhcpServerSelectionService {
     #>
     [string] SelectServer([EnvironmentContext] $environment, [string] $adSite) {
         if ($environment.IsDevelopment()) {
+            Write-Verbose -Message ("Selecting DHCP server for development environment '{0}' (forced site 'muc')." -f $environment.Name)
             return $this.DhcpServerAdapter.GetPrimaryServerForSite('muc', $true)
         }
 
         if ($environment.IsTest()) {
+            Write-Verbose -Message ("Selecting DHCP server for test environment '{0}' (forced site 'muc')." -f $environment.Name)
             return $this.DhcpServerAdapter.GetPrimaryServerForSite('muc', $false)
         }
 
+        Write-Verbose -Message ("Selecting DHCP server for production-like environment '{0}' and AD site '{1}'." -f $environment.Name, $adSite)
         return $this.DhcpServerAdapter.GetPrimaryServerForSite($adSite, $false)
     }
 }

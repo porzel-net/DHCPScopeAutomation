@@ -94,6 +94,8 @@ function Start-DhcpScopeAutomation {
     }
 
     $runtime = $runtimeFactory.CreateRuntime()
+    Write-Information -MessageData ('Starting automation run. Environment={0}; SkipPrefixOnboarding={1}; SkipIpDnsOnboarding={2}; SkipIpDnsDecommissioning={3}; SendFailureMail={4}' -f $runtime.Environment.Name, $SkipPrefixOnboarding.IsPresent, $SkipIpDnsOnboarding.IsPresent, $SkipIpDnsDecommissioning.IsPresent, (-not $SkipFailureMail.IsPresent))
+
     $summaries = $runtime.Execute(
         -not $SkipFailureMail.IsPresent,
         $SkipPrefixOnboarding.IsPresent,
@@ -105,6 +107,7 @@ function Start-DhcpScopeAutomation {
     Write-Information -MessageData ('Run log written to {0}' -f $runLogPath)
 
     foreach ($summary in @($summaries)) {
+        Write-Information -MessageData ('Summary {0}: SuccessCount={1}, FailureCount={2}, AuditEntries={3}' -f $summary.ProcessName, $summary.SuccessCount, $summary.FailureCount, @($summary.AuditEntries).Count)
         foreach ($entry in @($summary.AuditEntries)) {
             Write-AutomationLogEntry -Entry $entry
         }

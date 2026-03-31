@@ -133,6 +133,7 @@ class IpDnsLifecycleService {
         $summary = [BatchRunSummary]::new($this.ProcessName)
         $loadedWorkItems = @($workItems)
         $summary.AddAudit('Debug', "Loaded $($loadedWorkItems.Count) $($this.GetLifecycleDisplayName()) work item(s) for environment '$($environment.Name)'.")
+        $summary.AddAudit('Debug', "Lifecycle mode '$($this.Mode)' configured with source statuses '$($this.SourceStatuses -join ', ')' and target status '$($this.TargetStatus)'.")
 
         foreach ($workItem in $loadedWorkItems) {
             $this.ProcessWorkItem($workItem, $summary)
@@ -159,10 +160,25 @@ class IpDnsLifecycleService {
     # Template-method style execution: invariant steps stay fixed while mode-dependent behavior is delegated to helper methods.
     hidden [void] ProcessWorkItem([IpAddressWorkItem] $workItem, [BatchRunSummary] $summary) {
         $lines = @($this.GetProcessingLine($workItem))
+        $lines += ('Lifecycle mode: {0}' -f $this.Mode)
+        $lines += ('Source status: {0}' -f $workItem.Status)
+        $lines += ('Target status: {0}' -f $this.TargetStatus)
+        $lines += ('Domain: {0}' -f $workItem.Domain)
+        $lines += ('Prefix subnet: {0}' -f $workItem.PrefixSubnet.Cidr)
+        if (-not [string]::IsNullOrWhiteSpace($workItem.DnsName)) {
+            $lines += ('DNS name: {0}' -f $workItem.DnsName)
+        }
+        else {
+            $lines += 'DNS name: <none>'
+        }
         $summary.AddAudit('Debug', "Starting $($this.GetLifecycleDisplayName()) work item '$($workItem.GetIdentifier())'.")
 
         try {
             $this.ValidateWorkItem($workItem)
+            $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet)
+            $lines += ('Selected domain controller: {0}' -f $dnsContext.DomainController)
+            $lines += ('Resolved reverse zone: {0}' -f $dnsContext.ReverseZone)
+            $summary.AddAudit('Debug', "Resolved DNS context for IP '$($workItem.GetIdentifier())': DC='$($dnsContext.DomainController)', ReverseZone='$($dnsContext.ReverseZone)'.")
             $this.ExecuteDnsLifecycle($workItem)
             $lines += $this.GetDnsLifecycleResultLine()
 
@@ -192,9 +208,12 @@ class IpDnsLifecycleService {
     Work item to validate before processing.
     #>
     hidden [void] ValidateWorkItem([IpAddressWorkItem] $workItem) {
+        Write-Debug -Message ("Validating IP lifecycle work item '{0}' in mode '{1}'." -f $workItem.GetIdentifier(), $this.Mode)
         if ($this.Mode -eq 'onboarding' -and [string]::IsNullOrWhiteSpace($workItem.DnsName)) {
             throw [System.InvalidOperationException]::new("DNS name is missing for IP '$($workItem.GetIdentifier())'.")
         }
+
+        Write-Debug -Message ("Validation passed for IP lifecycle work item '{0}'." -f $workItem.GetIdentifier())
     }
 
     <#
@@ -212,10 +231,12 @@ class IpDnsLifecycleService {
     hidden [void] ExecuteDnsLifecycle([IpAddressWorkItem] $workItem) {
         switch ($this.Mode) {
             'onboarding' {
+                Write-Verbose -Message ("Executing IP DNS onboarding for '{0}'." -f $workItem.GetIdentifier())
                 $this.GatewayDnsService.EnsureIpDns($workItem)
                 break
             }
             'decommissioning' {
+                Write-Verbose -Message ("Executing IP DNS decommissioning for '{0}'." -f $workItem.GetIdentifier())
                 $this.GatewayDnsService.RemoveIpDns($workItem)
                 break
             }

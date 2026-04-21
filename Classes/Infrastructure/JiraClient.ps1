@@ -145,7 +145,7 @@ class JiraClient {
 
         $description = @"
 ||Subnetz ID||Prefix ||Forest (MTU, MTUDEV, MTUGOV, MTUCHINA)||Site Zuordnung||Windows/Linux||Delegation ||
-|$networkIp|/$networkMask| $forestShortName | $($workItem.SiteName) | unbekannt | $delegationText |
+        |$networkIp|/$networkMask| $forestShortName | $($workItem.ValuemationSiteMandant) | unbekannt | $delegationText |
 Confluence Doku:
 [Tier0-Operations CR Ticket erstellen - Tier0-CAS-Operations - MTU Confluence (dasa.de)|https://cpwa-confluence-p.muc.mtu.dasa.de:8453/display/TCO/Tier0-Operations+CR+Ticket+erstellen]
 "@

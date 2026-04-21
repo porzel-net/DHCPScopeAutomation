@@ -613,6 +613,45 @@ Describe 'Infrastructure adapters and module internals' {
 
                 $client.GetTicketKeyFromUrl('https://jira.example.test/browse/TCO-123') | Should -Be 'TCO-123'
             }
+
+            It 'uses the valuemation site mandant in prerequisite ticket descriptions' {
+                $client = [JiraClient]::new([AutomationCredential]::new('Jira', 'https://jira.example.test', (ConvertTo-SecureString 'secret' -AsPlainText -Force)))
+                $workItem = [PrefixWorkItem]::new(
+                    7, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                    'PREFIX-SITE', 17, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MANDANT-SITE', $null, 'routed'
+                )
+                $script:capturedCreateBody = $null
+                $script:capturedTransitionPostCount = 0
+
+                function Global:Invoke-RestMethod {
+                    param($Uri, $Method, $Headers, $Body)
+
+                    if ($Uri -match '/rest/api/2/issue/$' -and $Method -eq 'Post') {
+                        $script:capturedCreateBody = $Body
+                        return [pscustomobject]@{ key = 'TCO-123' }
+                    }
+
+                    if ($Uri -match '/rest/api/2/issue/TCO-123/transitions\?expand=transitions.fields$' -and $Method -eq 'Get') {
+                        return [pscustomobject]@{
+                            transitions = @([pscustomobject]@{ id = 11; name = 'Commit' })
+                        }
+                    }
+
+                    if ($Uri -match '/rest/api/2/issue/TCO-123/transitions$' -and $Method -eq 'Post') {
+                        $script:capturedTransitionPostCount++
+                        return $null
+                    }
+
+                    throw "Unexpected URI: $Uri"
+                }
+
+                $ticketUrl = $client.CreatePrerequisiteTicket($workItem, 'MTU', $true)
+
+                $ticketUrl | Should -Be 'https://jira.example.test/browse/TCO-123'
+                $script:capturedCreateBody | Should -Match 'MANDANT-SITE'
+                $script:capturedCreateBody | Should -Not -Match 'PREFIX-SITE'
+                $script:capturedTransitionPostCount | Should -Be 1
+            }
         }
 
         Context 'Private module functions' {

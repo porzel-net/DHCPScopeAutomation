@@ -377,6 +377,7 @@ Describe 'Infrastructure adapters and module internals' {
             It 'removes matching A and PTR records for an IP address' {
                 $adapter = [DnsServerAdapter]::new()
                 $script:removedDnsRecords = [System.Collections.Generic.List[string]]::new()
+                $script:dnsLines = [System.Collections.Generic.List[string]]::new()
 
                 function Global:Get-DnsServerResourceRecord {
                     param($ZoneName, $RRType)
@@ -412,15 +413,20 @@ Describe 'Infrastructure adapters and module internals' {
                     $null = $script:removedDnsRecords.Add(('A|{0}|{1}|{2}' -f $ZoneName, $Name, $RecordData))
                 }
 
-                $adapter.RemoveDnsRecordsForIp('dc01', 'de.mtu.corp', '30.20.10.in-addr.arpa', [IPv4Address]::new('10.20.30.10'))
+                $adapter.RemoveDnsRecordsForIp('dc01', 'de.mtu.corp', '30.20.10.in-addr.arpa', [IPv4Address]::new('10.20.30.10'), $script:dnsLines)
 
                 $script:removedDnsRecords | Should -Contain 'A|de.mtu.corp|host102030|10.20.30.10'
                 $script:removedDnsRecords | Should -Contain 'PTR|30.20.10.in-addr.arpa|10'
+                $script:dnsLines | Should -Contain 'Removing DNS records for IP 10.20.30.10 on server dc01 (zone=de.mtu.corp, reverseZone=30.20.10.in-addr.arpa).'
+                $script:dnsLines | Should -Contain 'Found 1 matching A record(s) for IP 10.20.30.10 in zone de.mtu.corp.'
+                $script:dnsLines | Should -Contain 'Found 1 matching PTR record(s) for owner 10 in reverse zone 30.20.10.in-addr.arpa.'
+                $script:dnsLines | Should -Contain 'Removing PTR record owner 10 in reverse zone 30.20.10.in-addr.arpa -> host102030.de.mtu.corp.'
             }
 
             It 'adds missing A and PTR records after cleaning stale DNS entries' {
                 $adapter = [DnsServerAdapter]::new()
                 $script:dnsAdds = [System.Collections.Generic.List[string]]::new()
+                $script:dnsLines = [System.Collections.Generic.List[string]]::new()
 
                 function Global:Get-DnsServerResourceRecord { return $null }
                 function Global:Remove-DnsServerResourceRecord {}
@@ -439,15 +445,20 @@ Describe 'Infrastructure adapters and module internals' {
                     'host102030.de.mtu.corp',
                     [IPv4Address]::new('10.20.30.10'),
                     '30.20.10.in-addr.arpa',
-                    'host102030.de.mtu.corp'
+                    'host102030.de.mtu.corp',
+                    $script:dnsLines
                 )
 
                 $script:dnsAdds | Should -Contain 'A|de.mtu.corp|host102030|10.20.30.10'
                 $script:dnsAdds | Should -Contain 'PTR|30.20.10.in-addr.arpa|10|host102030.de.mtu.corp'
+                $script:dnsLines | Should -Contain 'Removing existing DNS records for IP 10.20.30.10 before ensuring new records.'
+                $script:dnsLines | Should -Contain 'Creating A record host102030.de.mtu.corp -> 10.20.30.10.'
+                $script:dnsLines | Should -Contain 'Created PTR record owner 10 in reverse zone 30.20.10.in-addr.arpa -> host102030.de.mtu.corp.'
             }
 
             It 'skips adding DNS records when matching records already exist' {
                 $adapter = [DnsServerAdapter]::new()
+                $script:dnsLines = [System.Collections.Generic.List[string]]::new()
 
                 function Global:Remove-DnsServerResourceRecord {}
                 function Global:Get-DnsServerResourceRecord {
@@ -464,10 +475,13 @@ Describe 'Infrastructure adapters and module internals' {
                     'host102030.de.mtu.corp',
                     [IPv4Address]::new('10.20.30.10'),
                     '30.20.10.in-addr.arpa',
-                    'host102030.de.mtu.corp'
+                    'host102030.de.mtu.corp',
+                    $script:dnsLines
                 )
 
                 $script:dnsAddCount | Should -Be 0
+                $script:dnsLines | Should -Contain 'A record host102030.de.mtu.corp already exists.'
+                $script:dnsLines | Should -Contain 'PTR record owner 10 in reverse zone 30.20.10.in-addr.arpa already exists.'
             }
         }
 
@@ -524,6 +538,7 @@ Describe 'Infrastructure adapters and module internals' {
                     )
                 )
                 $script:dhcpCalls = [System.Collections.Generic.List[string]]::new()
+                $script:dhcpLines = [System.Collections.Generic.List[string]]::new()
 
                 function Global:Get-DhcpServerv4Scope { return $null }
                 function Global:Add-DhcpServerv4Scope {
@@ -543,11 +558,15 @@ Describe 'Infrastructure adapters and module internals' {
                     $null = $script:dhcpCalls.Add(('EXCLUDE|{0}|{1}|{2}|{3}|{4}' -f $ComputerName, $ScopeId, $StartRange, $EndRange, $ErrorAction))
                 }
 
-                $adapter.EnsureScope('m-dhcp02.de.mtu.corp', $definition)
+                $adapter.EnsureScope('m-dhcp02.de.mtu.corp', $definition, $script:dhcpLines)
 
                 $script:dhcpCalls | Should -Contain 'DNS|m-dhcp02.de.mtu.corp|10.20.30.0|OnClientRequest'
                 ($script:dhcpCalls | Where-Object { $_ -like 'ADD_SCOPE*' }).Count | Should -Be 1
                 ($script:dhcpCalls | Where-Object { $_ -like 'EXCLUDE*Stop' }).Count | Should -Be 3
+                $script:dhcpLines | Should -Contain 'Ensuring DHCP scope 10.20.30.0 on server m-dhcp02.de.mtu.corp.'
+                $script:dhcpLines | Should -Contain 'Configuring dynamic DNS settings for scope 10.20.30.0 on m-dhcp02.de.mtu.corp.'
+                $script:dhcpLines | Should -Contain 'Applying DHCP option values for scope 10.20.30.0 on m-dhcp02.de.mtu.corp.'
+                $script:dhcpLines | Should -Contain 'Adding mandatory DHCP exclusion range 10.20.30.0-10.20.30.0 to scope 10.20.30.0 on m-dhcp02.de.mtu.corp.'
             }
 
             It 'configures non-strict exclusions for larger dynamic ranges and skips scope creation when present' {
@@ -559,6 +578,7 @@ Describe 'Infrastructure adapters and module internals' {
                     )
                 )
                 $script:exclusionModes = [System.Collections.Generic.List[string]]::new()
+                $script:dhcpLines = [System.Collections.Generic.List[string]]::new()
 
                 $script:addScopeCount = 0
                 function Global:Get-DhcpServerv4Scope { return [pscustomobject]@{ ScopeId = '10.20.30.0' } }
@@ -570,34 +590,41 @@ Describe 'Infrastructure adapters and module internals' {
                     $null = $script:exclusionModes.Add([string] $ErrorAction)
                 }
 
-                $adapter.EnsureScope('m-dhcp02.de.mtu.corp', $definition)
+                $adapter.EnsureScope('m-dhcp02.de.mtu.corp', $definition, $script:dhcpLines)
 
                 $script:addScopeCount | Should -Be 0
                 ($script:exclusionModes | Select-Object -Unique) | Should -Be @('SilentlyContinue')
+                $script:dhcpLines | Should -Contain 'DHCP scope 10.20.30.0 already exists on m-dhcp02.de.mtu.corp, reusing existing scope.'
+                $script:dhcpLines | Should -Contain 'Applying DHCP option values for scope 10.20.30.0 on m-dhcp02.de.mtu.corp.'
             }
 
             It 'adds a failover scope only when a named failover relationship exists' {
                 $adapter = [DhcpServerAdapter]::new()
                 $script:failoverScopeCalls = 0
+                $script:dhcpLines = [System.Collections.Generic.List[string]]::new()
                 function Global:Get-DhcpServerv4Failover {
                     @([pscustomobject]@{ Name = 'FO-MUC' })
                 }
                 function Global:Add-DhcpServerv4FailoverScope { $script:failoverScopeCalls++ }
 
-                $adapter.EnsureScopeFailover('m-dhcp02.de.mtu.corp', [IPv4Subnet]::new('10.20.30.0/24'))
+                $adapter.EnsureScopeFailover('m-dhcp02.de.mtu.corp', [IPv4Subnet]::new('10.20.30.0/24'), $script:dhcpLines)
 
                 $script:failoverScopeCalls | Should -Be 1
+                $script:dhcpLines | Should -Contain 'Ensuring DHCP failover linkage for scope 10.20.30.0 on server m-dhcp02.de.mtu.corp.'
+                $script:dhcpLines | Should -Contain 'Linking scope 10.20.30.0 to failover FO-MUC on m-dhcp02.de.mtu.corp.'
             }
 
             It 'returns quietly when DHCP failover lookup fails' {
                 $adapter = [DhcpServerAdapter]::new()
 
                 $script:failoverScopeCalls = 0
+                $script:dhcpLines = [System.Collections.Generic.List[string]]::new()
                 function Global:Get-DhcpServerv4Failover { throw 'DHCP failover unavailable.' }
                 function Global:Add-DhcpServerv4FailoverScope { $script:failoverScopeCalls++ }
 
-                { $adapter.EnsureScopeFailover('m-dhcp02.de.mtu.corp', [IPv4Subnet]::new('10.20.30.0/24')) } | Should -Not -Throw
+                { $adapter.EnsureScopeFailover('m-dhcp02.de.mtu.corp', [IPv4Subnet]::new('10.20.30.0/24'), $script:dhcpLines) } | Should -Not -Throw
                 $script:failoverScopeCalls | Should -Be 0
+                $script:dhcpLines | Should -Contain 'Ensuring DHCP failover linkage for scope 10.20.30.0 on server m-dhcp02.de.mtu.corp.'
             }
 
             It 'keeps prefix decommissioning intentionally unimplemented' {

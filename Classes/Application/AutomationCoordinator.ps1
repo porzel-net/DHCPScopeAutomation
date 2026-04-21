@@ -129,7 +129,7 @@ class AutomationCoordinator {
                         'FailureSummaryMail',
                         "Failed to send failure summary mail. $($_.Exception.Message)",
                         $_.Exception.ToString(),
-                        [IssueHandlingContext]::CreateUnassigned()
+                        [IssueHandlingContext]::new('Script Developer', $null)
                     )
                 )
                 $notificationSummary.Complete()

@@ -48,13 +48,25 @@ class FakeDnsServerAdapter : DnsServerAdapter {
         [string] $dnsName,
         [IPv4Address] $ipAddress,
         [string] $reverseZone,
-        [string] $ptrDomainName
+        [string] $ptrDomainName,
+        [System.Collections.Generic.List[string]] $lines = $null
     ) {
         $null = $this.EnsuredDns.Add(('{0}|{1}|{2}' -f $dnsZone, $dnsName, $ipAddress.Value))
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Ensuring DNS records for {0} ({1}) in zone {2}.' -f $dnsName, $ipAddress.Value, $dnsZone))
+            $null = $lines.Add(('Removing existing DNS records for IP {0} before ensuring new records.' -f $ipAddress.Value))
+            $null = $lines.Add(('Creating A record {0} -> {1}.' -f $dnsName, $ipAddress.Value))
+            $null = $lines.Add(('Creating PTR record {0} -> {1}.' -f $reverseZone, $ptrDomainName))
+        }
     }
 
-    [void] RemoveDnsRecordsForIp([string] $dnsServer, [string] $dnsZone, [string] $reverseZone, [IPv4Address] $ipAddress) {
+    [void] RemoveDnsRecordsForIp([string] $dnsServer, [string] $dnsZone, [string] $reverseZone, [IPv4Address] $ipAddress, [System.Collections.Generic.List[string]] $lines = $null) {
         $null = $this.RemovedDns.Add(('{0}|{1}' -f $dnsZone, $ipAddress.Value))
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Removing DNS records for IP {0} in zone {1}.' -f $ipAddress.Value, $dnsZone))
+            $null = $lines.Add(('Removing A record(s) for IP {0}.' -f $ipAddress.Value))
+            $null = $lines.Add(('Removing PTR record(s) for IP {0}.' -f $ipAddress.Value))
+        }
     }
 }
 
@@ -71,6 +83,24 @@ class FakeJiraClient : JiraClient {
 
     [string] CreatePrerequisiteTicket([PrefixWorkItem] $workItem, [string] $forestShortName, [bool] $dnsZoneDelegated) {
         return $this.CreatedTicketUrl
+    }
+}
+
+class FakeMalformedJiraClient : FakeJiraClient {
+    FakeMalformedJiraClient([AutomationCredential] $credential) : base($credential) {
+    }
+
+    [void] EnsureTicketClosed([string] $jiraUrl) {
+        throw [System.ArgumentException]::new(("No valid Jira ticket key found in '{0}'." -f $jiraUrl))
+    }
+}
+
+class FakeOpenJiraClient : FakeJiraClient {
+    FakeOpenJiraClient([AutomationCredential] $credential) : base($credential) {
+    }
+
+    [void] EnsureTicketClosed([string] $jiraUrl) {
+        throw [System.InvalidOperationException]::new("Jira ticket 'TCO-9' is not closed yet. Current status is 'In Progress'. The work item is waiting on this existing ticket.")
     }
 }
 
@@ -125,12 +155,25 @@ class FakeDhcpServerAdapter : DhcpServerAdapter {
         return $this.SelectedServer
     }
 
-    [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition) {
+    [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition, [System.Collections.Generic.List[string]] $lines = $null) {
         $null = $this.EnsuredScopes.Add(('{0}|{1}' -f $dhcpServer, $definition.Subnet.Cidr))
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Ensuring DHCP scope {0} on server {1}.' -f $definition.Subnet.NetworkAddress.Value, $dhcpServer))
+            $null = $lines.Add(('Configuring dynamic DNS settings for scope {0} on {1}.' -f $definition.Subnet.NetworkAddress.Value, $dhcpServer))
+            $null = $lines.Add(('Applying DHCP option values for scope {0} on {1}.' -f $definition.Subnet.NetworkAddress.Value, $dhcpServer))
+            foreach ($range in @($definition.ExclusionRanges)) {
+                $mode = if ($range.MustSucceed) { 'mandatory' } else { 'best-effort' }
+                $null = $lines.Add(('Adding {0} DHCP exclusion range {1}-{2} to scope {3} on {4}.' -f $mode, $range.StartAddress.Value, $range.EndAddress.Value, $definition.Subnet.NetworkAddress.Value, $dhcpServer))
+            }
+        }
     }
 
-    [void] EnsureScopeFailover([string] $dhcpServer, [IPv4Subnet] $subnet) {
+    [void] EnsureScopeFailover([string] $dhcpServer, [IPv4Subnet] $subnet, [System.Collections.Generic.List[string]] $lines = $null) {
         $null = $this.FailoverScopes.Add(('{0}|{1}' -f $dhcpServer, $subnet.Cidr))
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Ensuring DHCP failover linkage for scope {0} on server {1}.' -f $subnet.NetworkAddress.Value, $dhcpServer))
+            $null = $lines.Add(('Linking scope {0} to failover FO-MUC on {1}.' -f $subnet.NetworkAddress.Value, $dhcpServer))
+        }
     }
 }
 
@@ -144,28 +187,43 @@ class FakeGatewayDnsService : GatewayDnsService {
     FakeGatewayDnsService([ActiveDirectoryAdapter] $activeDirectoryAdapter, [DnsServerAdapter] $dnsServerAdapter) : base($activeDirectoryAdapter, $dnsServerAdapter) {
     }
 
-    [void] EnsurePrefixGatewayDns([PrefixWorkItem] $workItem) {
+    [void] EnsurePrefixGatewayDns([PrefixWorkItem] $workItem, [System.Collections.Generic.List[string]] $lines = $null) {
         if ($this.ThrowOnPrefix) {
             throw [System.InvalidOperationException]::new('Gateway DNS failed.')
         }
 
         $null = $this.PrefixCalls.Add($workItem.GetIdentifier())
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Ensuring gateway DNS for prefix {0}.' -f $workItem.GetIdentifier()))
+            $null = $lines.Add(('Creating A record {0}.' -f $workItem.DnsName))
+            $null = $lines.Add(('Creating PTR record {0}.' -f $workItem.GetGatewayFqdn()))
+        }
     }
 
-    [void] EnsureIpDns([IpAddressWorkItem] $workItem) {
+    [void] EnsureIpDns([IpAddressWorkItem] $workItem, [System.Collections.Generic.List[string]] $lines = $null) {
         if ($this.ThrowOnIp) {
             throw [System.InvalidOperationException]::new('IP DNS failed.')
         }
 
         $null = $this.IpEnsureCalls.Add($workItem.GetIdentifier())
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Ensuring IP DNS for {0}.' -f $workItem.GetIdentifier()))
+            $null = $lines.Add(('Creating A record {0}.' -f $workItem.DnsName))
+            $null = $lines.Add(('Creating PTR record {0}.' -f $workItem.GetFqdn()))
+        }
     }
 
-    [void] RemoveIpDns([IpAddressWorkItem] $workItem) {
+    [void] RemoveIpDns([IpAddressWorkItem] $workItem, [System.Collections.Generic.List[string]] $lines = $null) {
         if ($this.ThrowOnIp) {
             throw [System.InvalidOperationException]::new('IP DNS failed.')
         }
 
         $null = $this.IpRemoveCalls.Add($workItem.GetIdentifier())
+        if ($null -ne $lines) {
+            $null = $lines.Add(('Removing IP DNS for {0}.' -f $workItem.GetIdentifier()))
+            $null = $lines.Add(('Removing A record(s) for IP {0}.' -f $workItem.IpAddress.Value))
+            $null = $lines.Add(('Removing PTR record(s) for IP {0}.' -f $workItem.IpAddress.Value))
+        }
     }
 }
 
@@ -308,7 +366,109 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
 
             $result.CanContinue | Should -BeFalse
             $result.RequiresNewJiraTicket | Should -BeTrue
-            $result.Reasons | Should -Contain 'Network is not assigned to any AD site.'
+            $result.Reasons[0] | Should -Match 'Network is not assigned to any AD site\.'
+            $result.Reasons[0] | Should -Match 'Current status: no existing Jira ticket is linked yet; a new ticket will be created\.'
+        }
+
+        It 'reports waiting on an existing Jira ticket when no AD site exists' {
+            $script:activeDirectory.SubnetSiteValue = $null
+            $workItem = [PrefixWorkItem]::new(
+                1, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-9', 'routed'
+            )
+
+            $result = $script:prerequisites.Evaluate($workItem, $script:environment)
+
+            $result.CanContinue | Should -BeFalse
+            $result.RequiresNewJiraTicket | Should -BeFalse
+            $result.RequiresExistingJiraWait | Should -BeTrue
+            $result.Reasons[0] | Should -Match 'Network is not assigned to any AD site\.'
+            $result.Reasons[0] | Should -Match 'Current status: waiting on existing Jira ticket \(may still be in progress\): https://jira\.example\.test/browse/TCO-9'
+        }
+
+        It 'assigns Tier-0/Admin Court to blocked prefixes with existing Jira links' {
+            $script:activeDirectory.SubnetSiteValue = $null
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $script:prerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                2, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-9', 'routed'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 0
+            $summary.FailureCount | Should -Be 1
+            $summary.Issues[0].GetHandlingDepartment() | Should -Be 'Tier-0/Admin Court'
+        }
+
+        It 'assigns Script Developer to malformed Jira URLs' {
+            $script:activeDirectory.SubnetSiteValue = 'MUC'
+            $script:dns.ReverseZoneName = '30.20.10.in-addr.arpa'
+            $script:dns.HasDelegation = $true
+            $malformedJira = New-Object -TypeName FakeMalformedJiraClient -ArgumentList $script:credential
+            $malformedPrerequisites = [PrerequisiteValidationService]::new($script:activeDirectory, $script:dns, $malformedJira)
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $malformedJira,
+                $malformedPrerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                3, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/not-a-key', 'routed'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 0
+            $summary.FailureCount | Should -Be 1
+            $summary.Issues[0].Message | Should -Match 'No valid Jira ticket key found'
+            $summary.Issues[0].GetHandlingDepartment() | Should -Be 'Script Developer'
+        }
+
+        It 'assigns Tier-0/Admin Court when an existing Jira ticket is still open' {
+            $script:activeDirectory.SubnetSiteValue = 'MUC'
+            $script:dns.ReverseZoneName = '30.20.10.in-addr.arpa'
+            $script:dns.HasDelegation = $true
+            $openJira = New-Object -TypeName FakeOpenJiraClient -ArgumentList $script:credential
+            $openPrerequisites = [PrerequisiteValidationService]::new($script:activeDirectory, $script:dns, $openJira)
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $openJira,
+                $openPrerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                4, '10.20.30.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', 'https://jira.example.test/browse/TCO-9', 'routed'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 0
+            $summary.FailureCount | Should -Be 1
+            $summary.Issues[0].Message | Should -Match 'is not closed yet'
+            $summary.Issues[0].GetHandlingDepartment() | Should -Be 'Tier-0/Admin Court'
         }
 
         It 'continues when all prerequisites are satisfied and closes an existing ticket' {
@@ -336,7 +496,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
                 'MUC', 7, 101, '10.20.30.254', 'gw102030.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
-            $script:gatewayDns.EnsurePrefixGatewayDns($workItem)
+            $script:gatewayDns.EnsurePrefixGatewayDns($workItem, $null)
 
             $script:gatewayDns.PrefixCalls | Should -Contain '10.20.30.0/24'
         }
@@ -344,8 +504,8 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
         It 'applies and removes IP DNS through the shared DNS facade' {
             $workItem = [IpAddressWorkItem]::new(20, '10.20.30.10', 'onboarding_open_dns', 'host102030', 'de.mtu.corp', '10.20.30.0/24')
 
-            $script:gatewayDns.EnsureIpDns($workItem)
-            $script:gatewayDns.RemoveIpDns($workItem)
+            $script:gatewayDns.EnsureIpDns($workItem, $null)
+            $script:gatewayDns.RemoveIpDns($workItem, $null)
 
             $script:gatewayDns.IpEnsureCalls | Should -Contain '10.20.30.10'
             $script:gatewayDns.IpRemoveCalls | Should -Contain '10.20.30.10'
@@ -461,6 +621,9 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:gatewayDns.PrefixCalls | Should -Contain '10.20.31.0/24'
             $script:netBox.MarkedPrefixes | Should -Contain 12
             $script:dhcp.EnsuredScopes.Count | Should -Be 0
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Gateway DNS requested for prefix 10.20.31.0/24\.'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Creating A record gw102031.de.mtu.corp'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Gateway DNS updated\.'
         }
 
         It 'completes not_routed no_dhcp prefixes without gateway DNS or a default gateway' {
@@ -525,6 +688,10 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:journal.PrefixInfoEntries[0] | Should -Match 'Resolved reverse zone: 30.20.10.in-addr.arpa'
             $script:journal.PrefixInfoEntries[0] | Should -Match 'Calculated DHCP exclusion ranges: 3'
             $script:journal.PrefixInfoEntries[0] | Should -Match 'Calculated DHCP exclusion range: 10.20.30.0 - 10.20.30.0'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Ensuring DHCP scope 10.20.30.0 on server m-dhcp02.de.mtu.corp'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Creating A record gw102030.de.mtu.corp'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Creating PTR record gw102030.de.mtu.corp'
+            $script:journal.PrefixInfoEntries[0] | Should -Match 'Ensuring DHCP failover linkage for scope 10.20.30.0'
         }
 
         It 'captures prefix failures and degrades journal write errors into warnings' {
@@ -577,6 +744,10 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:journal.IpInfoEntries[0] | Should -Match 'Source status: onboarding_open_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Target status: onboarding_done_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Planned DNS action: ensure A/PTR'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Ensuring IP DNS for 10.20.30.10'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Creating A record host102030'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Creating PTR record host102030.de.mtu.corp'
+            $script:journal.IpInfoEntries[0] | Should -Match 'IP status updated to onboarding_done_dns'
         }
 
         It 'captures onboarding failures for IP work items with missing DNS names' {
@@ -595,6 +766,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $summary.FailureCount | Should -Be 1
             $summary.Issues[0].Message | Should -Match 'DNS name is missing'
             $summary.Issues[0].ResourceUrl | Should -Be 'https://netbox.example.test/ipam/ip-addresses/21/'
+            $summary.Issues[0].GetHandlingDepartment() | Should -Be 'Network Engineer'
             $script:journal.IpErrorEntries.Count | Should -Be 1
         }
 
@@ -616,6 +788,10 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $script:journal.IpInfoEntries[0] | Should -Match 'Source status: decommissioning_open_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Target status: decommissioning_done_dns'
             $script:journal.IpInfoEntries[0] | Should -Match 'Planned DNS action: remove A/PTR'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Removing IP DNS for 10.20.30.12'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Removing A record\(s\) for IP 10.20.30.12'
+            $script:journal.IpInfoEntries[0] | Should -Match 'Removing PTR record\(s\) for IP 10.20.30.12'
+            $script:journal.IpInfoEntries[0] | Should -Match 'IP status updated to decommissioning_done_dns'
         }
 
         It 'downgrades IP journal write failures into warnings while keeping the original issue' {
@@ -690,6 +866,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $summaries[1].ProcessName | Should -Be 'FailureNotification'
             $summaries[1].FailureCount | Should -Be 1
             $summaries[1].Issues[0].Message | Should -Match 'Failed to send failure summary mail'
+            $summaries[1].Issues[0].GetHandlingDepartment() | Should -Be 'Script Developer'
         }
 
         It 'loads prefix work items through ProcessBatch before executing the use case' {

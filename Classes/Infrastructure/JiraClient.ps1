@@ -123,7 +123,7 @@ class JiraClient {
         }
 
         if ($status -ne 'Geschlossen') {
-            throw [System.InvalidOperationException]::new("Jira ticket '$ticketKey' is not closed. Current status: '$status'.")
+            throw [System.InvalidOperationException]::new("Jira ticket '$ticketKey' is not closed yet. Current status is '$status'. The work item is waiting on this existing ticket.")
         }
     }
 

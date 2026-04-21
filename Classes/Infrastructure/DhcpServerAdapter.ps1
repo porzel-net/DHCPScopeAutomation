@@ -22,6 +22,12 @@ $adapter = [DhcpServerAdapter]::new()
 $adapter.GetPrimaryServerForSite('muc', $false)
 #>
 class DhcpServerAdapter {
+    hidden [void] AppendLine([System.Collections.Generic.List[string]] $lines, [string] $message) {
+        if ($null -ne $lines -and -not [string]::IsNullOrWhiteSpace($message)) {
+            $null = $lines.Add($message)
+        }
+    }
+
     <#
     .SYNOPSIS
     Maps a site code to the DHCP server naming pattern.
@@ -129,14 +135,17 @@ class DhcpServerAdapter {
     .OUTPUTS
     System.Void
     #>
-    [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition) {
+    [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition, [System.Collections.Generic.List[string]] $lines = $null) {
         $scopeId = $definition.Subnet.NetworkAddress.Value
         Write-Verbose -Message ("Ensuring DHCP scope '{0}' on server '{1}'." -f $scopeId, $dhcpServer)
         Write-Debug -Message ("Scope details: Name='{0}', Range='{1}-{2}', Mask='{3}', LeaseDays={4}, DynamicDns={5}, Exclusions={6}" -f $definition.Name, $definition.Range.StartAddress.Value, $definition.Range.EndAddress.Value, $definition.SubnetMask, $definition.LeaseDurationDays, $definition.ConfigureDynamicDns, @($definition.ExclusionRanges).Count)
+        $this.AppendLine($lines, ('Ensuring DHCP scope {0} on server {1}.' -f $scopeId, $dhcpServer))
+        $this.AppendLine($lines, ('Scope details: Name={0}, Range={1}-{2}, Mask={3}, LeaseDays={4}, DynamicDns={5}, Exclusions={6}' -f $definition.Name, $definition.Range.StartAddress.Value, $definition.Range.EndAddress.Value, $definition.SubnetMask, $definition.LeaseDurationDays, $definition.ConfigureDynamicDns, @($definition.ExclusionRanges).Count))
         $existingScope = Get-DhcpServerv4Scope -ComputerName $dhcpServer -ScopeId $scopeId -ErrorAction SilentlyContinue
 
         if (-not $existingScope) {
             Write-Verbose -Message ("Creating new DHCP scope '{0}' on '{1}'." -f $scopeId, $dhcpServer)
+            $this.AppendLine($lines, ('Creating new DHCP scope {0} on {1}.' -f $scopeId, $dhcpServer))
             Add-DhcpServerv4Scope `
                 -ComputerName $dhcpServer `
                 -Name $definition.Name `
@@ -149,10 +158,12 @@ class DhcpServerAdapter {
         }
         else {
             Write-Verbose -Message ("DHCP scope '{0}' already exists on '{1}', reusing existing scope." -f $scopeId, $dhcpServer)
+            $this.AppendLine($lines, ('DHCP scope {0} already exists on {1}, reusing existing scope.' -f $scopeId, $dhcpServer))
         }
 
         if ($definition.ConfigureDynamicDns) {
             Write-Verbose -Message ("Configuring dynamic DNS settings for scope '{0}' on '{1}'." -f $scopeId, $dhcpServer)
+            $this.AppendLine($lines, ('Configuring dynamic DNS settings for scope {0} on {1}.' -f $scopeId, $dhcpServer))
             Set-DhcpServerv4DnsSetting `
                 -ComputerName $dhcpServer `
                 -ScopeId $scopeId `
@@ -164,6 +175,7 @@ class DhcpServerAdapter {
         }
 
         Write-Verbose -Message ("Applying DHCP option values for scope '{0}' on '{1}'." -f $scopeId, $dhcpServer)
+        $this.AppendLine($lines, ('Applying DHCP option values for scope {0} on {1}.' -f $scopeId, $dhcpServer))
         Set-DhcpServerv4OptionValue -ComputerName $dhcpServer -ScopeId $scopeId -DnsDomain $definition.DnsDomain -Router $definition.Range.GatewayAddress.Value -ErrorAction Stop
         Set-DhcpServerv4OptionValue -ComputerName $dhcpServer -ScopeId $scopeId -OptionId 28 -Value $definition.Range.BroadcastAddress.Value -ErrorAction Stop
 
@@ -171,6 +183,7 @@ class DhcpServerAdapter {
         foreach ($range in @($definition.ExclusionRanges)) {
             if ($range.MustSucceed) {
                 Write-Debug -Message ("Adding mandatory DHCP exclusion range '{0}-{1}' to scope '{2}' on '{3}'." -f $range.StartAddress.Value, $range.EndAddress.Value, $scopeId, $dhcpServer)
+                $this.AppendLine($lines, ('Adding mandatory DHCP exclusion range {0}-{1} to scope {2} on {3}.' -f $range.StartAddress.Value, $range.EndAddress.Value, $scopeId, $dhcpServer))
                 Add-DhcpServerv4ExclusionRange `
                     -ComputerName $dhcpServer `
                     -ScopeId $scopeId `
@@ -181,6 +194,7 @@ class DhcpServerAdapter {
             }
 
             Write-Debug -Message ("Adding best-effort DHCP exclusion range '{0}-{1}' to scope '{2}' on '{3}'." -f $range.StartAddress.Value, $range.EndAddress.Value, $scopeId, $dhcpServer)
+            $this.AppendLine($lines, ('Adding best-effort DHCP exclusion range {0}-{1} to scope {2} on {3}.' -f $range.StartAddress.Value, $range.EndAddress.Value, $scopeId, $dhcpServer))
             Add-DhcpServerv4ExclusionRange `
                 -ComputerName $dhcpServer `
                 -ScopeId $scopeId `
@@ -196,23 +210,27 @@ class DhcpServerAdapter {
     .OUTPUTS
     System.Void
     #>
-    [void] EnsureScopeFailover([string] $dhcpServer, [IPv4Subnet] $subnet) {
+    [void] EnsureScopeFailover([string] $dhcpServer, [IPv4Subnet] $subnet, [System.Collections.Generic.List[string]] $lines = $null) {
         Write-Verbose -Message ("Ensuring DHCP failover linkage for scope '{0}' on server '{1}'." -f $subnet.NetworkAddress.Value, $dhcpServer)
+        $this.AppendLine($lines, ('Ensuring DHCP failover linkage for scope {0} on server {1}.' -f $subnet.NetworkAddress.Value, $dhcpServer))
         try {
             $failover = Get-DhcpServerv4Failover -ComputerName $dhcpServer -ErrorAction Stop | Select-Object -First 1
         }
         catch {
             # Missing failover is not fatal for provisioning; the scope itself is still valid.
             Write-Verbose -Message ("No DHCP failover configuration available on '{0}'. Scope '{1}' remains without failover link." -f $dhcpServer, $subnet.NetworkAddress.Value)
+            $this.AppendLine($lines, ('No DHCP failover configuration available on {0}. Scope {1} remains without failover link.' -f $dhcpServer, $subnet.NetworkAddress.Value))
             return
         }
 
         if ($null -eq $failover -or [string]::IsNullOrWhiteSpace($failover.Name)) {
             Write-Verbose -Message ("Failover query returned no usable failover name on '{0}'." -f $dhcpServer)
+            $this.AppendLine($lines, ('Failover query returned no usable failover name on {0}.' -f $dhcpServer))
             return
         }
 
         Write-Verbose -Message ("Linking scope '{0}' to failover '{1}' on '{2}'." -f $subnet.NetworkAddress.Value, $failover.Name, $dhcpServer)
+        $this.AppendLine($lines, ('Linking scope {0} to failover {1} on {2}.' -f $subnet.NetworkAddress.Value, $failover.Name, $dhcpServer))
         Add-DhcpServerv4FailoverScope -ComputerName $dhcpServer -Name $failover.Name -ScopeId $subnet.NetworkAddress.Value -ErrorAction SilentlyContinue | Out-Null
     }
 

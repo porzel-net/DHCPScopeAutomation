@@ -21,6 +21,12 @@ $adapter = [DnsServerAdapter]::new()
 $adapter.FindBestReverseZoneName([IPv4Subnet]::new('10.20.30.0/24'), 'dc01.example.test')
 #>
 class DnsServerAdapter {
+    hidden [void] AppendLine([System.Collections.Generic.List[string]] $lines, [string] $message) {
+        if ($null -ne $lines -and -not [string]::IsNullOrWhiteSpace($message)) {
+            $null = $lines.Add($message)
+        }
+    }
+
     <#
     .SYNOPSIS
     Finds the best matching reverse zone for a subnet.
@@ -143,25 +149,49 @@ class DnsServerAdapter {
     .OUTPUTS
     System.Void
     #>
-    [void] RemoveDnsRecordsForIp([string] $dnsServer, [string] $dnsZone, [string] $reverseZone, [IPv4Address] $ipAddress) {
+    [void] RemoveDnsRecordsForIp(
+        [string] $dnsServer,
+        [string] $dnsZone,
+        [string] $reverseZone,
+        [IPv4Address] $ipAddress,
+        [System.Collections.Generic.List[string]] $lines = $null
+    ) {
         $ipValue = $ipAddress.Value
         Write-Verbose -Message ("Removing DNS records for IP '{0}' on server '{1}' (zone='{2}', reverseZone='{3}')." -f $ipValue, $dnsServer, $dnsZone, $reverseZone)
+        $this.AppendLine($lines, ('Removing DNS records for IP {0} on server {1} (zone={2}, reverseZone={3}).' -f $ipValue, $dnsServer, $dnsZone, $reverseZone))
 
         $matchingARecords = Get-DnsServerResourceRecord -ComputerName $dnsServer -ZoneName $dnsZone -RRType A -ErrorAction SilentlyContinue |
             Where-Object { $_.RecordData.IPv4Address.IPAddressToString -eq $ipValue }
         Write-Debug -Message ("Found {0} matching A record(s) for IP '{1}' in zone '{2}'." -f @($matchingARecords).Count, $ipValue, $dnsZone)
+        $this.AppendLine($lines, ('Found {0} matching A record(s) for IP {1} in zone {2}.' -f @($matchingARecords).Count, $ipValue, $dnsZone))
 
         foreach ($record in @($matchingARecords)) {
+            $this.AppendLine($lines, ('Removing A record {0}.{1} -> {2}.' -f $record.HostName, $dnsZone, $ipValue))
             Remove-DnsServerResourceRecord -ZoneName $dnsZone -Name $record.HostName -RRType A -RecordData $ipValue -ComputerName $dnsServer -Force -ErrorAction Stop
+            $this.AppendLine($lines, ('Removed A record {0}.{1} -> {2}.' -f $record.HostName, $dnsZone, $ipValue))
         }
 
         $ptrOwnerName = $this.GetPtrOwnerName($reverseZone, $ipAddress)
         $matchingPtrRecords = Get-DnsServerResourceRecord -ComputerName $dnsServer -ZoneName $reverseZone -RRType PTR -ErrorAction SilentlyContinue |
             Where-Object { $_.HostName -eq $ptrOwnerName }
         Write-Debug -Message ("Found {0} matching PTR record(s) for owner '{1}' in reverse zone '{2}'." -f @($matchingPtrRecords).Count, $ptrOwnerName, $reverseZone)
+        $this.AppendLine($lines, ('Found {0} matching PTR record(s) for owner {1} in reverse zone {2}.' -f @($matchingPtrRecords).Count, $ptrOwnerName, $reverseZone))
 
         foreach ($ptrRecord in @($matchingPtrRecords)) {
+            $currentTarget = $ptrRecord.RecordData.PtrDomainName
+            if ($currentTarget) { $currentTarget = $currentTarget.TrimEnd('.') }
+            $currentTargetSuffix = ''
+            if ($currentTarget) {
+                $currentTargetSuffix = ' -> {0}' -f $currentTarget
+            }
+            $this.AppendLine($lines, ('Removing PTR record owner {0} in reverse zone {1}{2}.' -f $ptrOwnerName, $reverseZone, $currentTargetSuffix))
             Remove-DnsServerResourceRecord -ComputerName $dnsServer -ZoneName $reverseZone -InputObject $ptrRecord -Force -ErrorAction Stop
+            if ($currentTarget) {
+                $this.AppendLine($lines, ('Removed PTR record owner {0} in reverse zone {1} -> {2}.' -f $ptrOwnerName, $reverseZone, $currentTarget))
+            }
+            else {
+                $this.AppendLine($lines, ('Removed PTR record owner {0} in reverse zone {1}.' -f $ptrOwnerName, $reverseZone))
+            }
         }
     }
 
@@ -177,31 +207,41 @@ class DnsServerAdapter {
         [string] $dnsName,
         [IPv4Address] $ipAddress,
         [string] $reverseZone,
-        [string] $ptrDomainName
+        [string] $ptrDomainName,
+        [System.Collections.Generic.List[string]] $lines = $null
     ) {
         $relativeDnsName = $this.GetRelativeDnsName($dnsName, $dnsZone)
         Write-Verbose -Message ("Ensuring DNS records for '{0}' ({1}) on server '{2}' with reverse zone '{3}'." -f $dnsName, $ipAddress.Value, $dnsServer, $reverseZone)
         Write-Debug -Message ("Computed relative DNS name '{0}' for zone '{1}'." -f $relativeDnsName, $dnsZone)
+        $this.AppendLine($lines, ('Ensuring DNS records for {0} ({1}) on server {2} with reverse zone {3}.' -f $dnsName, $ipAddress.Value, $dnsServer, $reverseZone))
+        $this.AppendLine($lines, ('Computed relative DNS name {0} for zone {1}.' -f $relativeDnsName, $dnsZone))
         # Remove first so onboarding is idempotent even when stale records already exist.
-        $this.RemoveDnsRecordsForIp($dnsServer, $dnsZone, $reverseZone, $ipAddress)
+        $this.AppendLine($lines, ('Removing existing DNS records for IP {0} before ensuring new records.' -f $ipAddress.Value))
+        $this.RemoveDnsRecordsForIp($dnsServer, $dnsZone, $reverseZone, $ipAddress, $lines)
 
         $existingARecord = Get-DnsServerResourceRecord -ComputerName $dnsServer -ZoneName $dnsZone -Name $relativeDnsName -RRType A -ErrorAction SilentlyContinue
         if (-not $existingARecord) {
             Write-Debug -Message ("Creating A record '{0}' in zone '{1}' with IP '{2}'." -f $relativeDnsName, $dnsZone, $ipAddress.Value)
+            $this.AppendLine($lines, ('Creating A record {0}.{1} -> {2}.' -f $relativeDnsName, $dnsZone, $ipAddress.Value))
             Add-DnsServerResourceRecordA -ComputerName $dnsServer -ZoneName $dnsZone -Name $relativeDnsName -IPv4Address $ipAddress.Value -ErrorAction Stop
+            $this.AppendLine($lines, ('Created A record {0}.{1} -> {2}.' -f $relativeDnsName, $dnsZone, $ipAddress.Value))
         }
         else {
             Write-Debug -Message ("A record '{0}' in zone '{1}' already exists." -f $relativeDnsName, $dnsZone)
+            $this.AppendLine($lines, ('A record {0}.{1} already exists.' -f $relativeDnsName, $dnsZone))
         }
 
         $ptrOwnerName = $this.GetPtrOwnerName($reverseZone, $ipAddress)
         $existingPtrRecord = Get-DnsServerResourceRecord -ComputerName $dnsServer -ZoneName $reverseZone -Name $ptrOwnerName -RRType PTR -ErrorAction SilentlyContinue
         if (-not $existingPtrRecord) {
             Write-Debug -Message ("Creating PTR record owner '{0}' in reverse zone '{1}' -> '{2}'." -f $ptrOwnerName, $reverseZone, $ptrDomainName)
+            $this.AppendLine($lines, ('Creating PTR record owner {0} in reverse zone {1} -> {2}.' -f $ptrOwnerName, $reverseZone, $ptrDomainName))
             Add-DnsServerResourceRecordPtr -ComputerName $dnsServer -ZoneName $reverseZone -Name $ptrOwnerName -PtrDomainName $ptrDomainName -ErrorAction Stop
+            $this.AppendLine($lines, ('Created PTR record owner {0} in reverse zone {1} -> {2}.' -f $ptrOwnerName, $reverseZone, $ptrDomainName))
         }
         else {
             Write-Debug -Message ("PTR record owner '{0}' in reverse zone '{1}' already exists." -f $ptrOwnerName, $reverseZone)
+            $this.AppendLine($lines, ('PTR record owner {0} in reverse zone {1} already exists.' -f $ptrOwnerName, $reverseZone))
         }
     }
 }

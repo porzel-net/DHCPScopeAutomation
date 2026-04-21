@@ -52,6 +52,12 @@ class IpDnsLifecycleService {
         $this.LogService = $logService
     }
 
+    hidden [void] AppendLine([System.Collections.Generic.List[string]] $lines, [string] $message) {
+        if ($null -ne $lines -and -not [string]::IsNullOrWhiteSpace($message)) {
+            $null = $lines.Add($message)
+        }
+    }
+
     <#
     .SYNOPSIS
     Initializes the lifecycle mode for the service instance.
@@ -86,7 +92,7 @@ class IpDnsLifecycleService {
                 break
             }
             default {
-                throw [System.ArgumentOutOfRangeException]::new('mode', "Unsupported IP DNS lifecycle mode '$mode'.")
+                throw [System.ArgumentOutOfRangeException]::new('mode', $this.GetUnsupportedModeMessage($mode))
             }
         }
     }
@@ -159,34 +165,37 @@ class IpDnsLifecycleService {
     #>
     # Template-method style execution: invariant steps stay fixed while mode-dependent behavior is delegated to helper methods.
     hidden [void] ProcessWorkItem([IpAddressWorkItem] $workItem, [BatchRunSummary] $summary) {
-        $lines = @($this.GetProcessingLine($workItem))
-        $lines += ('Lifecycle mode: {0}' -f $this.Mode)
-        $lines += ('Source status: {0}' -f $workItem.Status)
-        $lines += ('Target status: {0}' -f $this.TargetStatus)
-        $lines += ('Domain: {0}' -f $workItem.Domain)
-        $lines += ('Prefix subnet: {0}' -f $workItem.PrefixSubnet.Cidr)
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $this.AppendLine($lines, $this.GetProcessingLine($workItem))
+        $this.AppendLine($lines, ('Lifecycle mode: {0}' -f $this.Mode))
+        $this.AppendLine($lines, ('Source status: {0}' -f $workItem.Status))
+        $this.AppendLine($lines, ('Target status: {0}' -f $this.TargetStatus))
+        $this.AppendLine($lines, ('Domain: {0}' -f $workItem.Domain))
+        $this.AppendLine($lines, ('Prefix subnet: {0}' -f $workItem.PrefixSubnet.Cidr))
         if (-not [string]::IsNullOrWhiteSpace($workItem.DnsName)) {
-            $lines += ('DNS name: {0}' -f $workItem.DnsName)
-            $lines += ('DNS FQDN: {0}' -f $workItem.GetFqdn())
+            $this.AppendLine($lines, ('DNS name: {0}' -f $workItem.DnsName))
+            $this.AppendLine($lines, ('DNS FQDN: {0}' -f $workItem.GetFqdn()))
         }
         else {
-            $lines += 'DNS name: <none>'
-            $lines += 'DNS FQDN: <none>'
+            $this.AppendLine($lines, 'DNS name: <none>')
+            $this.AppendLine($lines, 'DNS FQDN: <none>')
         }
         $summary.AddAudit('Debug', "Starting $($this.GetLifecycleDisplayName()) work item '$($workItem.GetIdentifier())'.")
 
         try {
             $this.ValidateWorkItem($workItem)
-            $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet)
-            $lines += ('Selected domain controller: {0}' -f $dnsContext.DomainController)
-            $lines += ('Resolved reverse zone: {0}' -f $dnsContext.ReverseZone)
-            $lines += $this.GetDnsActionPlanLine($workItem, $dnsContext)
+            $this.AppendLine($lines, ('Validation passed for IP lifecycle work item {0}.' -f $workItem.GetIdentifier()))
+            $dnsContext = $this.GatewayDnsService.GetDnsExecutionContext($workItem.PrefixSubnet, $lines)
+            $this.AppendLine($lines, ('Selected domain controller: {0}' -f $dnsContext.DomainController))
+            $this.AppendLine($lines, ('Resolved reverse zone: {0}' -f $dnsContext.ReverseZone))
+            $this.AppendLine($lines, $this.GetDnsActionPlanLine($workItem, $dnsContext))
             $summary.AddAudit('Debug', "Resolved DNS context for IP '$($workItem.GetIdentifier())': DC='$($dnsContext.DomainController)', ReverseZone='$($dnsContext.ReverseZone)'.")
-            $this.ExecuteDnsLifecycle($workItem)
-            $lines += $this.GetDnsLifecycleResultLine()
+            $this.ExecuteDnsLifecycle($workItem, $lines)
+            $this.AppendLine($lines, $this.GetDnsLifecycleResultLine())
 
+            $this.AppendLine($lines, ('Updating NetBox IP status to {0}.' -f $this.TargetStatus))
             $this.NetBoxClient.UpdateIpStatus($workItem.Id, $this.TargetStatus)
-            $lines += ('IP status updated to {0}.' -f $this.TargetStatus)
+            $this.AppendLine($lines, ('IP status updated to {0}.' -f $this.TargetStatus))
 
             $lines = $this.WriteExecutionLog($workItem, $lines)
             $this.JournalService.WriteIpInfo($workItem, $lines)
@@ -231,20 +240,22 @@ class IpDnsLifecycleService {
     Work item for which DNS should be changed.
     #>
     # Strategy dispatch for the lifecycle action; new modes should extend this seam instead of duplicating the service.
-    hidden [void] ExecuteDnsLifecycle([IpAddressWorkItem] $workItem) {
+    hidden [void] ExecuteDnsLifecycle([IpAddressWorkItem] $workItem, [System.Collections.Generic.List[string]] $lines = $null) {
         switch ($this.Mode) {
             'onboarding' {
                 Write-Verbose -Message ("Executing IP DNS onboarding for '{0}'." -f $workItem.GetIdentifier())
-                $this.GatewayDnsService.EnsureIpDns($workItem)
+                $this.AppendLine($lines, ('Executing IP DNS onboarding for {0}.' -f $workItem.GetIdentifier()))
+                $this.GatewayDnsService.EnsureIpDns($workItem, $lines)
                 break
             }
             'decommissioning' {
                 Write-Verbose -Message ("Executing IP DNS decommissioning for '{0}'." -f $workItem.GetIdentifier())
-                $this.GatewayDnsService.RemoveIpDns($workItem)
+                $this.AppendLine($lines, ('Executing IP DNS decommissioning for {0}.' -f $workItem.GetIdentifier()))
+                $this.GatewayDnsService.RemoveIpDns($workItem, $lines)
                 break
             }
             default {
-                throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.")
+                throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage())
             }
         }
     }
@@ -271,13 +282,13 @@ class IpDnsLifecycleService {
     #>
     hidden [void] HandleProcessingFailure(
         [IpAddressWorkItem] $workItem,
-        [string[]] $lines,
+        [System.Collections.Generic.List[string]] $lines,
         [BatchRunSummary] $summary,
         [System.Exception] $exception
     ) {
         $message = $this.GetFailureMessage($workItem, $exception)
-        $lines += $message
-        $lines += ('Exception type: {0}' -f $exception.GetType().FullName)
+        $this.AppendLine($lines, $message)
+        $this.AppendLine($lines, ('Exception type: {0}' -f $exception.GetType().FullName))
         $lines = $this.WriteExecutionLog($workItem, $lines)
 
         try {
@@ -311,7 +322,27 @@ class IpDnsLifecycleService {
     IssueHandlingContext
     #>
     hidden [IssueHandlingContext] BuildFailureHandlingContext([IpAddressWorkItem] $workItem, [System.Exception] $exception) {
-        return [IssueHandlingContext]::CreateUnassigned()
+        $department = $this.ResolveHandlingDepartment($exception.Message)
+        if ([string]::IsNullOrWhiteSpace($department)) {
+            return [IssueHandlingContext]::CreateUnassigned()
+        }
+
+        return [IssueHandlingContext]::new($department, $null)
+    }
+
+    <#
+    .SYNOPSIS
+    Maps IP lifecycle failures to the responsible department.
+    .OUTPUTS
+    System.String
+    #>
+    hidden [string] ResolveHandlingDepartment([string] $message) {
+        if ($message -match '^DNS name is missing for IP .*\.$') { return 'Network Engineer' }
+        if ($message -match '^No reverse zone found for prefix .*\.$') { return 'Tier-0/Admin Court' }
+        if ($message -match '^Unsupported reverse zone .*\.$') { return 'Tier-0/Admin Court' }
+        if ($message -match '^Unsupported IP DNS lifecycle mode .*\.$') { return 'Script Developer' }
+
+        return $null
     }
 
     <#
@@ -325,9 +356,9 @@ class IpDnsLifecycleService {
     .OUTPUTS
     System.String[]
     #>
-    hidden [string[]] WriteExecutionLog([IpAddressWorkItem] $workItem, [string[]] $lines) {
+    hidden [string[]] WriteExecutionLog([IpAddressWorkItem] $workItem, [System.Collections.Generic.List[string]] $lines) {
         $logPath = $this.LogService.CreateLogPath('ip', $workItem.GetIdentifier())
-        $linesWithLogPath = @($lines + ('Log file: {0}' -f $logPath))
+        $linesWithLogPath = @($lines.ToArray() + ('Log file: {0}' -f $logPath))
         $this.LogService.WriteLog($logPath, $linesWithLogPath)
         return $linesWithLogPath
     }
@@ -344,7 +375,7 @@ class IpDnsLifecycleService {
         switch ($this.Mode) {
             'onboarding' { $result = 'IP onboarding'; break }
             'decommissioning' { $result = 'IP decommissioning'; break }
-            default { throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.") }
+            default { throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage()) }
         }
 
         return $result
@@ -362,7 +393,7 @@ class IpDnsLifecycleService {
         switch ($this.Mode) {
             'onboarding' { $result = ('Processing IP onboarding {0}' -f $workItem.GetIdentifier()); break }
             'decommissioning' { $result = ('Processing IP decommissioning {0}' -f $workItem.GetIdentifier()); break }
-            default { throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.") }
+            default { throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage()) }
         }
 
         return $result
@@ -380,7 +411,7 @@ class IpDnsLifecycleService {
         switch ($this.Mode) {
             'onboarding' { $result = 'DNS records ensured.'; break }
             'decommissioning' { $result = 'DNS records removed.'; break }
-            default { throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.") }
+            default { throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage()) }
         }
 
         return $result
@@ -405,7 +436,7 @@ class IpDnsLifecycleService {
                 break
             }
             default {
-                throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.")
+                throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage())
             }
         }
 
@@ -424,7 +455,7 @@ class IpDnsLifecycleService {
         switch ($this.Mode) {
             'onboarding' { $result = ('Completed IP DNS onboarding for {0}' -f $workItem.GetIdentifier()); break }
             'decommissioning' { $result = ('Completed IP DNS decommissioning for {0}' -f $workItem.GetIdentifier()); break }
-            default { throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.") }
+            default { throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage()) }
         }
 
         return $result
@@ -442,9 +473,24 @@ class IpDnsLifecycleService {
         switch ($this.Mode) {
             'onboarding' { $result = "Failed to process IP '$($workItem.GetIdentifier())'. $($exception.Message)"; break }
             'decommissioning' { $result = "Failed to decommission IP '$($workItem.GetIdentifier())'. $($exception.Message)"; break }
-            default { throw [System.InvalidOperationException]::new("Unsupported IP DNS lifecycle mode '$($this.Mode)'.") }
+            default { throw [System.InvalidOperationException]::new($this.GetUnsupportedModeMessage()) }
         }
 
         return $result
+    }
+
+    <#
+    .SYNOPSIS
+    Returns the standard unsupported-mode message.
+    .OUTPUTS
+    System.String
+    #>
+    hidden [string] GetUnsupportedModeMessage([string] $mode) {
+        $resolvedMode = $mode
+        if ([string]::IsNullOrWhiteSpace($mode)) {
+            $resolvedMode = $this.Mode
+        }
+
+        return "Unsupported IP DNS lifecycle mode '$resolvedMode'. Valid values are 'onboarding' and 'decommissioning'."
     }
 }

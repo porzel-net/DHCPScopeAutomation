@@ -59,7 +59,10 @@ class PrerequisiteValidationService {
 
         if ([string]::IsNullOrWhiteSpace($evaluation.ObservedAdSite)) {
             Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': no AD site mapping found." -f $workItem.GetIdentifier())
-            $evaluation.AddReason('Network is not assigned to any AD site.')
+            $evaluation.AddReason($this.BuildBlockingReason(
+                'Network is not assigned to any AD site.',
+                $workItem
+            ))
             $evaluation.RequiresNewJiraTicket = [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)
             $evaluation.RequiresExistingJiraWait = -not $evaluation.RequiresNewJiraTicket
             return $evaluation
@@ -78,7 +81,10 @@ class PrerequisiteValidationService {
 
         if ([string]::IsNullOrWhiteSpace($evaluation.ReverseZoneName)) {
             Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': reverse zone not found." -f $workItem.GetIdentifier())
-            $evaluation.AddReason('Expected a reverse DNS zone, but none was found.')
+            $evaluation.AddReason($this.BuildBlockingReason(
+                'Expected a reverse DNS zone, but none was found.',
+                $workItem
+            ))
             $evaluation.RequiresNewJiraTicket = [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)
             $evaluation.RequiresExistingJiraWait = -not $evaluation.RequiresNewJiraTicket
             return $evaluation
@@ -91,7 +97,10 @@ class PrerequisiteValidationService {
 
         if (-not $evaluation.HasDnsDelegation) {
             Write-Verbose -Message ("Prerequisite check failed for prefix '{0}': reverse DNS delegation missing." -f $workItem.GetIdentifier())
-            $evaluation.AddReason('Expected a DNS delegation, but none was found.')
+            $evaluation.AddReason($this.BuildBlockingReason(
+                'Expected a DNS delegation, but none was found.',
+                $workItem
+            ))
             $evaluation.RequiresNewJiraTicket = [string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)
             $evaluation.RequiresExistingJiraWait = -not $evaluation.RequiresNewJiraTicket
             return $evaluation
@@ -105,5 +114,19 @@ class PrerequisiteValidationService {
         $evaluation.CanContinue = $true
         Write-Verbose -Message ("Prerequisites satisfied for prefix '{0}'." -f $workItem.GetIdentifier())
         return $evaluation
+    }
+
+    <#
+    .SYNOPSIS
+    Adds a blocking reason with Jira status context.
+    .OUTPUTS
+    System.String
+    #>
+    hidden [string] BuildBlockingReason([string] $baseReason, [PrefixWorkItem] $workItem) {
+        if ([string]::IsNullOrWhiteSpace($workItem.ExistingTicketUrl)) {
+            return ('{0} Current status: no existing Jira ticket is linked yet; a new ticket will be created.' -f $baseReason)
+        }
+
+        return ('{0} Current status: waiting on existing Jira ticket (may still be in progress): {1}' -f $baseReason, $workItem.ExistingTicketUrl)
     }
 }

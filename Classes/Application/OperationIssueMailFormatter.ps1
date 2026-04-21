@@ -30,7 +30,7 @@ class OperationIssueMailFormatter {
             return ''
         }
 
-        return [System.Security.SecurityElement]::Escape($value)
+        return [System.Net.WebUtility]::HtmlEncode($value)
     }
 
     <#

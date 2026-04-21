@@ -277,6 +277,28 @@ Describe 'Domain and supporting services' {
                 $body | Should -Match 'Handler: Alice'
             }
 
+            It 'encodes special characters without emitting apostrophe entities that mail clients may show literally' {
+                $formatter = [OperationIssueMailFormatter]::new()
+                $issues = @(
+                    [OperationIssue]::new(
+                        'Prefix',
+                        "10.20.30.0/24's",
+                        "Failed to process prefix '10.20.30.0/24' & <invalid> `"quoted`".",
+                        'details',
+                        [IssueHandlingContext]::new("FIST's Team", "O'Brien"),
+                        'https://netbox.example.test/prefix/1?filter=a&b=1'
+                    )
+                )
+
+                $body = $formatter.BuildFailureSummaryBody($issues)
+
+                $body | Should -Not -Match '&apos;'
+                $body | Should -Match '&#39;'
+                $body | Should -Match '&amp;'
+                $body | Should -Match '&lt;invalid&gt;'
+                $body | Should -Match '&quot;quoted&quot;'
+            }
+
             It 'writes log files to the configured base path' {
                 $basePath = Join-Path -Path $TestDrive -ChildPath 'logs'
                 $service = [WorkItemLogService]::new($basePath)

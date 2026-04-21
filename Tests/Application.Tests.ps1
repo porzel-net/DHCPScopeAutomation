@@ -359,7 +359,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
                 [OperationIssue]::new(
                     'Prefix',
                     '10.20.30.0/24',
-                    'failed',
+                    "Failed to process prefix '10.20.30.0/24'.",
                     'details',
                     [IssueHandlingContext]::new('FIST', 'Alice'),
                     'https://netbox.example.test/ipam/prefixes/7/'
@@ -373,6 +373,8 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $mailClient.LastSubject | Should -Be 'DHCPScopeAutomation'
             $mailClient.LastBody | Should -Match 'FIST'
             $mailClient.LastBody | Should -Match 'https://netbox.example.test/ipam/prefixes/7/'
+            $mailClient.LastBody | Should -Not -Match '&apos;'
+            $mailClient.LastBody | Should -Match '&#39;10.20.30.0/24&#39;'
         }
 
         It 'builds a runtime from relative configuration and credential files' {

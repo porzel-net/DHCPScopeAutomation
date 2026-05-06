@@ -969,7 +969,7 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             )
             $workItem = [PrefixWorkItem]::new(
                 34, '10.20.37.0/24', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
-                'MUC', 7, 109, '10.20.37.1', 'gw102037.de.mtu.corp', 'MUC', $null, 'routed'
+                'MUC', 7, 109, '10.20.37.2', 'gw102037.de.mtu.corp', 'MUC', $null, 'routed'
             )
 
             $summary = $service.ProcessWorkItems($script:environment, @($workItem))

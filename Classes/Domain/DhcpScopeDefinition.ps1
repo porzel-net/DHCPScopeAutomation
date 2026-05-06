@@ -106,6 +106,31 @@ class DhcpScopeDefinition {
             }
         }
 
+        if (
+            $workItem.DHCPType -eq 'dhcp_dynamic' -and
+            $null -ne $workItem.DefaultGatewayAddress -and
+            $workItem.DefaultGatewayAddress.Value -eq $calculatedRange.StartAddress.Value
+        ) {
+            $gatewayAlreadyExcluded = $false
+            foreach ($exclusion in $exclusions) {
+                if (
+                    $workItem.DefaultGatewayAddress.GetUInt32() -ge $exclusion.StartAddress.GetUInt32() -and
+                    $workItem.DefaultGatewayAddress.GetUInt32() -le $exclusion.EndAddress.GetUInt32()
+                ) {
+                    $gatewayAlreadyExcluded = $true
+                    break
+                }
+            }
+
+            if (-not $gatewayAlreadyExcluded) {
+                $exclusions += [DhcpExclusionRange]::new(
+                    $workItem.DefaultGatewayAddress,
+                    $workItem.DefaultGatewayAddress,
+                    $true
+                )
+            }
+        }
+
         return [DhcpScopeDefinition]::new(
             $scopeName,
             $workItem.PrefixSubnet,

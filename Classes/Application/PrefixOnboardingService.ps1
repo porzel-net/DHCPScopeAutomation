@@ -63,6 +63,23 @@ class PrefixOnboardingService {
         }
     }
 
+    hidden [IPv4Address] ResolveDhcpGatewayAddress([DhcpScopeDefinition] $scopeDefinition, [PrefixWorkItem] $workItem) {
+        $derivedGatewayAddress = $scopeDefinition.Range.GatewayAddress
+        $firstUsableAddress = $scopeDefinition.Range.StartAddress
+
+        if ($workItem.DefaultGatewayAddress.Value -eq $derivedGatewayAddress.Value) {
+            return $derivedGatewayAddress
+        }
+
+        if ($workItem.DefaultGatewayAddress.Value -eq $firstUsableAddress.Value) {
+            return $workItem.DefaultGatewayAddress
+        }
+
+        throw [System.InvalidOperationException]::new(
+            "Gateway mismatch for prefix '$($workItem.GetIdentifier())'. Expected '$($derivedGatewayAddress.Value)' or '$($firstUsableAddress.Value)', NetBox provides '$($workItem.DefaultGatewayAddress.Value)'."
+        )
+    }
+
     <#
     .SYNOPSIS
     Loads open prefixes from NetBox and processes them.
@@ -280,6 +297,7 @@ class PrefixOnboardingService {
         [BatchRunSummary] $summary
     ) {
         $scopeDefinition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
+        $scopeDefinition.Range.GatewayAddress = $this.ResolveDhcpGatewayAddress($scopeDefinition, $workItem)
         $this.AppendLine($lines, ('Calculated DHCP scope name: {0}' -f $scopeDefinition.Name))
         $this.AppendLine($lines, ('Calculated DHCP subnet mask: {0}' -f $scopeDefinition.SubnetMask))
         $this.AppendLine($lines, ('Calculated DHCP range: {0} - {1}' -f $scopeDefinition.Range.StartAddress.Value, $scopeDefinition.Range.EndAddress.Value))
@@ -297,12 +315,6 @@ class PrefixOnboardingService {
                 $rangeMode = if ($range.MustSucceed) { 'mandatory' } else { 'best-effort' }
                 $this.AppendLine($lines, ('Calculated DHCP exclusion range: {0} - {1} ({2})' -f $range.StartAddress.Value, $range.EndAddress.Value, $rangeMode))
             }
-        }
-
-        if ($scopeDefinition.Range.GatewayAddress.Value -ne $workItem.DefaultGatewayAddress.Value) {
-            throw [System.InvalidOperationException]::new(
-                "Gateway mismatch for prefix '$($workItem.GetIdentifier())'. Expected '$($scopeDefinition.Range.GatewayAddress.Value)', NetBox provides '$($workItem.DefaultGatewayAddress.Value)'."
-            )
         }
 
         # Server selection is environment-aware and intentionally delegated so onboarding does not encode routing policy itself.

@@ -149,6 +149,7 @@ class FakeNetBoxClient : NetBoxClient {
 class FakeDhcpServerAdapter : DhcpServerAdapter {
     [string] $SelectedServer = 'm-dhcp02.de.mtu.corp'
     [System.Collections.Generic.List[string]] $EnsuredScopes = [System.Collections.Generic.List[string]]::new()
+    [System.Collections.Generic.List[string]] $ConfiguredRouters = [System.Collections.Generic.List[string]]::new()
     [System.Collections.Generic.List[string]] $FailoverScopes = [System.Collections.Generic.List[string]]::new()
 
     [string] GetPrimaryServerForSite([string] $site, [bool] $isDevelopment) {
@@ -157,6 +158,7 @@ class FakeDhcpServerAdapter : DhcpServerAdapter {
 
     [void] EnsureScope([string] $dhcpServer, [DhcpScopeDefinition] $definition, [System.Collections.Generic.List[string]] $lines = $null) {
         $null = $this.EnsuredScopes.Add(('{0}|{1}' -f $dhcpServer, $definition.Subnet.Cidr))
+        $null = $this.ConfiguredRouters.Add($definition.Range.GatewayAddress.Value)
         if ($null -ne $lines) {
             $null = $lines.Add(('Ensuring DHCP scope {0} on server {1}.' -f $definition.Subnet.NetworkAddress.Value, $dhcpServer))
             $null = $lines.Add(('Configuring dynamic DNS settings for scope {0} on {1}.' -f $definition.Subnet.NetworkAddress.Value, $dhcpServer))
@@ -976,6 +978,35 @@ class RecordingIpDnsLifecycleService : IpDnsLifecycleService {
             $summary.FailureCount | Should -Be 1
             $summary.Issues[0].Message | Should -Match 'Gateway mismatch'
             $script:dhcp.EnsuredScopes.Count | Should -Be 0
+        }
+
+        It 'accepts the first usable IP as DHCP gateway when NetBox provides it' {
+            $script:activeDirectory.SubnetSiteValue = 'MUC'
+            $script:dns.ReverseZoneName = '157.53.in-addr.arpa'
+            $script:dns.HasDelegation = $true
+            $service = [PrefixOnboardingService]::new(
+                $script:netBox,
+                $script:activeDirectory,
+                $script:jira,
+                $script:prerequisites,
+                $script:selector,
+                $script:dhcp,
+                $script:gatewayDns,
+                $script:journal,
+                $script:logService
+            )
+            $workItem = [PrefixWorkItem]::new(
+                35, '53.157.150.0/23', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                'MUC', 7, 110, '53.157.150.1', 'gw53157150.de.mtu.corp', 'MUC', $null, 'routed'
+            )
+
+            $summary = $service.ProcessWorkItems($script:environment, @($workItem))
+
+            $summary.SuccessCount | Should -Be 1
+            $summary.FailureCount | Should -Be 0
+            $script:dhcp.EnsuredScopes | Should -Contain 'm-dhcp02.de.mtu.corp|53.157.150.0/23'
+            $script:dhcp.ConfiguredRouters | Should -Contain '53.157.150.1'
+            $script:netBox.MarkedPrefixes | Should -Contain 35
         }
 
         It 'loads IP work items through ProcessBatch for DNS onboarding' {

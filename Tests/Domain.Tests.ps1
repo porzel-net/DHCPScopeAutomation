@@ -142,6 +142,32 @@ Describe 'Domain and supporting services' {
                 ($definition.ExclusionRanges | ForEach-Object MustSucceed | Select-Object -Unique) | Should -Be @($false)
             }
 
+            It 'adds a strict exclusion when the first usable IP is the gateway on a /25 dynamic scope' {
+                $workItem = [PrefixWorkItem]::new(
+                    1, '10.20.30.128/25', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                    'MUC', 7, 101, '10.20.30.129', 'gw102030129.de.mtu.corp', 'MUC', $null, 'routed'
+                )
+                $definition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
+
+                $definition.ExclusionRanges.Count | Should -Be 1
+                $definition.ExclusionRanges[0].StartAddress.Value | Should -Be '10.20.30.129'
+                $definition.ExclusionRanges[0].EndAddress.Value | Should -Be '10.20.30.129'
+                $definition.ExclusionRanges[0].MustSucceed | Should -BeTrue
+            }
+
+            It 'does not add a duplicate exclusion when the first usable IP is already excluded on a /23 dynamic scope' {
+                $workItem = [PrefixWorkItem]::new(
+                    1, '53.157.150.0/23', 'Office', 'dhcp_dynamic', 'de.mtu.corp',
+                    'MUC', 7, 101, '53.157.150.1', 'gw53157150.de.mtu.corp', 'MUC', $null, 'routed'
+                )
+                $definition = [DhcpScopeDefinition]::FromPrefixWorkItem($workItem)
+
+                $definition.ExclusionRanges.Count | Should -Be 6
+                ($definition.ExclusionRanges | Where-Object {
+                    $_.StartAddress.Value -eq '53.157.150.1' -and $_.EndAddress.Value -eq '53.157.150.1'
+                }).Count | Should -Be 1
+            }
+
             It 'creates a single strict exclusion for a static scope' {
                 $workItem = [PrefixWorkItem]::new(
                     1, '10.20.30.0/24', 'Office', 'dhcp_static', 'de.mtu.corp',

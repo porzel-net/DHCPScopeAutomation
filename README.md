@@ -28,6 +28,8 @@ The current rewrite supports these use cases:
   - Validates AD site, reverse zone and delegation prerequisites
   - Creates a Jira prerequisite ticket when automation cannot proceed yet
   - Provisions DHCP scopes for `dhcp_dynamic` and `dhcp_static`
+  - Accepts a NetBox default gateway either at the derived upper-end gateway address or at the first usable host IP
+  - Protects a first-usable-host gateway from leases by excluding that address from dynamic DHCP scopes when needed
   - Handles `no_dhcp` prefixes without creating a DHCP scope
   - Updates NetBox to `onboarding_done_dns_dhcp`
 
@@ -87,6 +89,13 @@ Examples:
 - `OperationIssue`
 
 These classes model the business concepts and normalize data before infrastructure code is called.
+
+For DHCP-backed prefixes the current domain rules are:
+
+- The lease range starts at the first usable host address in the subnet.
+- The derived gateway address is the upper-end gateway near the broadcast address.
+- NetBox may alternatively provide the first usable host address as the default gateway.
+- When the first usable host address is used as the default gateway for a dynamic scope, the address is added as a DHCP exclusion if it is not already excluded by the prefix-specific exclusion rules.
 
 #### `Classes/Infrastructure`
 
